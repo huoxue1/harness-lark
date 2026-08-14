@@ -1,0 +1,124 @@
+# harness-lark
+
+Lark/飞书渠道插件，为 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 提供飞书通信能力。通信部分参考 [openclaw-lark](https://github.com/larksuite/openclaw-lark)（MIT, ByteDance Ltd.），适配 dsh 的 Cordis 插件体系。
+
+[English](README.md) | 中文
+
+## 功能
+
+| 类别 | 能力 |
+|---|---|
+| 💬 IM 消息收发 | WebSocket 长连接接收消息、文本/卡片回复、@提及、群聊/私聊策略、重连去重 |
+| 🃏 交互卡片 + 流式回复 | 思考过程（reasoning）流式 → 生成（answer）流式 → 最终结果更新到卡片，含可折叠思考面板、耗时/token footer |
+| 🖼️ 媒体 | 图片/文件/音频的上传、下载与发送 |
+| 📄 文档/Wiki/Drive | 创建/读取/更新云文档（docx）、知识库节点、云盘文件 |
+| 📊 Base/表格/日历/任务 | 多维表格（bitable）、电子表格、日历事件、任务 |
+| 🔐 用户 OAuth | 设备授权码流程（RFC 8628），用户级 token 管理 |
+
+## 架构
+
+- **会话模型**：每个飞书会话（chat_id）映射一个持久的 dsh agent（`ctx.agents.resume` 优先，失败则 `create`），上下文跨消息、跨重启保留。
+- **通信层**：`@larksuiteoapi/node-sdk` 的 `WSClient` 长连接 + `EventDispatcher` 路由（参考 openclaw-lark 的 `monitor.ts` / `lark-client.ts`）。
+- **回复通路**：飞书消息 → `agent.followup()`；`assistant/chunk`（reasoning-delta / text-delta）→ 流式卡片；`turn/end` → 完成卡片。
+- **工具注册**：所有飞书能力以 dsh 工具（`ctx.tools.register` + `defineTool`）暴露给模型。
+
+## 安装
+
+### 前置条件
+
+- Node.js ≥ 22
+- 已安装 DeepSeek Harness（`dsh` CLI）
+- 飞书开放平台应用（凭据：`appId`、`appSecret`；推荐开启长连接模式，无需公网回调地址）
+
+### 作为 bundle 安装
+
+```sh
+# 在项目根目录构建
+pnpm install
+pnpm run build
+
+# 安装到 dsh profile
+dsh plugin --profile web add ./path/to/harness-lark
+```
+
+或在 profile 的 `cordis.patch.yml` 中手动加入：
+
+```yaml
+- insert:
+    - id: lark
+      name: 'harness-lark'
+      config:
+        appId: !!js process.env.FEISHU_APP_ID
+        appSecret: !!js process.env.FEISHU_APP_SECRET
+        brand: feishu        # feishu | lark
+        connectionMode: websocket
+        dmPolicy: open       # open | pairing | allowlist | disabled
+        groupPolicy: disabled
+        requireMentionInGroups: true
+```
+
+## 配置
+
+| 字段 | 类型 | 默认 | 说明 |
+|---|---|---|---|
+| `appId` | string | — | 飞书应用 ID（缺省时仅注册工具、不启动网关） |
+| `appSecret` | string | — | 飞书应用密钥（缺省时仅注册工具、不启动网关） |
+| `encryptKey` | string | — | 事件加密密钥（长连接模式可留空） |
+| `verificationToken` | string | — | 事件验证令牌（长连接模式可留空） |
+| `brand` | `feishu` \| `lark` | `feishu` | 平台品牌 |
+| `connectionMode` | `websocket` \| `webhook` | `websocket` | 事件接收模式 |
+| `provider` | string | — | 创建的 agent 使用的 provider（缺省走默认） |
+| `model` | string | — | 创建的 agent 使用的模型 |
+| `replyMode` | `auto` \| `static` \| `streaming` | `auto` | 回复模式（`auto` 走静态文本） |
+| `dmPolicy` | `open` \| `pairing` \| `allowlist` \| `disabled` | `open` | 私聊策略 |
+| `groupPolicy` | `open` \| `allowlist` \| `disabled` | `disabled` | 群聊策略 |
+| `allowlist` | string[] | — | open_id 白名单 |
+| `requireMentionInGroups` | boolean | `true` | 群聊中是否需要 @机器人 |
+| `dedupTtlMs` | number | 12h | 消息去重窗口 |
+
+## 工具清单
+
+| 工具 | 说明 |
+|---|---|
+| `feishu_create_doc` | 从 Markdown 创建云文档 |
+| `feishu_fetch_doc` | 读取云文档（Markdown） |
+| `feishu_update_doc` | 向云文档追加 Markdown |
+| `feishu_wiki_space_node` | 列出知识库节点 |
+| `feishu_drive_file` | 搜索/列出云盘文件 |
+| `feishu_bitable_app` / `_table` / `_record` / `_field` / `_view` | 多维表格操作 |
+| `feishu_sheet` | 电子表格创建/读取/写入 |
+| `feishu_calendar_event` | 日历事件 CRUD |
+| `feishu_task_task` | 任务 CRUD/完成 |
+| `feishu_oauth` | 用户 OAuth 授权/状态/撤销 |
+
+## 开发
+
+```sh
+pnpm install
+pnpm run typecheck   # tsc --noEmit
+pnpm run test        # vitest
+pnpm run build       # tsdown -> lib/
+```
+
+### 目录结构
+
+```
+src/
+  index.ts                 # 插件入口（name/inject/Config/apply）
+  core/                    # 配置 schema、LarkClient、类型、去重、OAuth、token store
+  channel/                 # WebSocket 网关 + 事件处理
+  messaging/inbound/       # 消息解析、@提及、去重
+  messaging/outbound/      # 文本/卡片/媒体发送
+  agent/bridge.ts          # per-chat 持久 agent 桥接
+  card/                    # 交互卡片构建 + 流式控制器
+  tools/                   # 文档/Wiki/Drive、Base/表格/日历/任务、OAuth 工具
+tests/                     # vitest 单测
+```
+
+## 安全说明
+
+与 OpenClaw 插件相同，此插件在授权范围内以机器人身份调用飞书 API，存在模型幻觉、提示注入等固有风险。建议仅作为私聊助手使用，不要加入群聊或允许他人交互；保持默认安全配置（`groupPolicy: disabled`、`requireMentionInGroups: true`）。
+
+## 许可证
+
+[MIT](LICENSE)。通信与卡片设计参考 [openclaw-lark](https://github.com/larksuite/openclaw-lark)（MIT, ByteDance Ltd.）。
