@@ -70,6 +70,13 @@ profile 的 `cordis.patch.yml`（镜像方式由 entrypoint 生成，可自行�
     # dedupTtlMs: 43200000   # 消息去重窗口
 ```
 
+**镜像方式的环境变量**（由容器 entrypoint 消费，非插件配置）：
+
+| 变量 | 说明 |
+|---|---|
+| `DSH_TRUSTED_HOSTS` | 空格分隔的 Host 列表，通过 `--trusted-host` 加入 dsh 的 `/api` 信任围栏。局域网 IP 访问 Web UI 时设置（如 `192.168.10.251`），否则 `/api` 返回 403 |
+| `DSH_WEB_FORWARD` | 设为 `0` 可关闭容器内的端口转发器（默认开启；dsh 只绑容器回环，需要它才能经 Docker 发布端口访问 UI） |
+
 ## 用户授权（一次性）
 
 要让机器人以**你的身份**读写你的云文档/表格/日历，在飞书私聊里发送：
