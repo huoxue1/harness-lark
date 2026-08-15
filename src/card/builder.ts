@@ -9,6 +9,7 @@
  */
 
 import { optimizeMarkdownStyle } from './markdown-style.ts'
+import { splitTextAndTables } from './markdown-table.ts'
 
 /** Element id used for the streaming text area in cards. */
 export const STREAMING_ELEMENT_ID = 'streaming_content'
@@ -337,11 +338,15 @@ export function buildCompleteCard(params: {
     })
   }
 
-  // Full answer text.
-  elements.push({
-    tag: 'markdown',
-    content: optimizeMarkdownStyle(text),
-  })
+  // Full answer text. Markdown tables are converted to native card `table`
+  // components (the card markdown element renders them as raw text); each
+  // remaining markdown segment is style-optimized individually.
+  const answerSegments = splitTextAndTables(text).map((segment) =>
+    segment.tag === 'table'
+      ? segment
+      : { ...segment, content: optimizeMarkdownStyle(String(segment.content)) },
+  )
+  elements.push(...answerSegments)
 
   // Footer meta-info: status · elapsed · model / tokens · cache · context.
   const fp = formatFooterRuntimeSegments({ footer, metrics: footerMetrics, elapsedMs, isError, isAborted })
