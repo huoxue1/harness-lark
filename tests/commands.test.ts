@@ -12,6 +12,18 @@ function makeCtx(overrides: Partial<CommandContext> = {}): CommandContext {
       { provider: 'deepseek-official', model: 'deepseek-v4-flash' },
       { provider: 'deepseek-official', model: 'deepseek-v4-pro' },
     ],
+    client: {
+      account: {
+        appId: 'cli_test',
+        appSecret: 'secret',
+        brand: 'feishu',
+        config: { connectionMode: 'websocket' },
+      },
+      botOpenId: undefined,
+      botName: undefined,
+      wsConnected: false,
+    } as unknown as CommandContext['client'],
+    senderOpenId: 'ou_test',
     ...overrides,
   }
 }
@@ -90,6 +102,19 @@ describe('slash commands', () => {
     expect(r.reply).toContain('/status')
     expect(r.reply).toContain('/model')
     expect(r.reply).toContain('/cd')
+    expect(r.reply).toContain('/feishu')
+  })
+
+  it('/feishu doctor returns diagnostics', async () => {
+    const r = await runCommand('/feishu doctor', makeCtx())
+    expect(r.handled).toBe(true)
+    expect(r.reply).toContain('诊断')
+    expect(r.reply).toContain('app_id')
+  })
+
+  it('/feishu unknown subcommand returns a hint', async () => {
+    const r = await runCommand('/feishu bogus', makeCtx())
+    expect(r.reply).toContain('未知的 /feishu 子命令')
   })
 
   it('unknown command returns a hint', async () => {

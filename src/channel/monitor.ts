@@ -7,7 +7,7 @@
  */
 
 import type { AgentBridge } from '../agent/bridge.ts'
-import { LarkClient } from '../core/lark-client.ts'
+import type { LarkClient } from '../core/lark-client.ts'
 import type { HarnessLarkConfig } from '../core/config-schema.ts'
 import { MessageDedup } from '../messaging/inbound/dedup.ts'
 import { handleMessageEvent, type MonitorContext } from './event-handlers.ts'
@@ -16,6 +16,9 @@ export interface MonitorOptions {
   config: HarnessLarkConfig
   accountId?: string
   bridge: AgentBridge
+  /** The shared LarkClient — probe/WS must use the SAME instance the bridge
+   *  exposes to commands/tools so bot identity and connection state agree. */
+  lark: LarkClient
   abortSignal?: AbortSignal
 }
 
@@ -24,17 +27,7 @@ export interface MonitorOptions {
  * Resolves when `abortSignal` fires.
  */
 export async function monitorFeishuProvider(opts: MonitorOptions): Promise<void> {
-  const { config, accountId = 'default', bridge, abortSignal } = opts
-
-  const lark = new LarkClient({
-    accountId,
-    appId: config.appId,
-    appSecret: config.appSecret,
-    encryptKey: config.encryptKey ?? '',
-    verificationToken: config.verificationToken ?? '',
-    brand: config.brand,
-    config,
-  })
+  const { config, accountId = 'default', bridge, lark, abortSignal } = opts
 
   const dedup = new MessageDedup({ ttlMs: config.dedupTtlMs })
 

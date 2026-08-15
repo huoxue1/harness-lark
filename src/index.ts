@@ -106,6 +106,7 @@ export function apply(ctx: Context, config: HarnessLarkConfig): void {
       config,
       accountId,
       bridge,
+      lark,
       abortSignal: signal.signal,
     }).catch((error: unknown) => {
       logger.error(`[harness-lark] gateway failed: ${error instanceof Error ? error.message : String(error)}`)

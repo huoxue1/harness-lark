@@ -9,6 +9,8 @@
 
 import type { ModelSelection } from '@deepseek-ai/dsh-agent'
 import type { Agent } from '@deepseek-ai/dsh-agent'
+import type { LarkClient } from '../core/lark-client.ts'
+import { requestDeviceAuthorization } from '../core/device-flow.ts'
 
 /** Per-chat mutable state a command handler may read or mutate. */
 export interface CommandContext {
@@ -20,6 +22,10 @@ export interface CommandContext {
   cwd: { value: string }
   /** List of available models (provider/model pairs). */
   availableModels: Array<{ provider: string; model: string }>
+  /** The Lark client, for auth/doctor diagnostics. */
+  client: LarkClient
+  /** The message sender's open_id (for /feishu auth scoping). */
+  senderOpenId: string
 }
 
 /** Result of a command: reply text plus optional state effects (applied already). */
@@ -58,6 +64,8 @@ export async function runCommand(text: string, cmdCtx: CommandContext): Promise<
     case '/new':
     case '/reset':
       return reset(cmdCtx)
+    case '/feishu':
+      return await feishu(arg, cmdCtx)
     case '/help':
       return help()
     default:
@@ -143,16 +151,125 @@ function reset(ctx: CommandContext): CommandResult {
   }
 }
 
+/**
+ * /feishu auth | /feishu doctor — Feishu plugin subcommands.
+ * `auth` starts the device authorization flow for the sender; `doctor`
+ * runs a diagnostics report over credentials, bot identity, and connection.
+ */
+async function feishu(subcommand: string, ctx: CommandContext): Promise<CommandResult> {
+  const sub = subcommand.toLowerCase()
+  if (sub === 'auth' || sub === '') {
+    return await feishuAuth(ctx)
+  }
+  if (sub === 'doctor') {
+    return await feishuDoctor(ctx)
+  }
+  return { reply: `未知的 /feishu 子命令: "${subcommand}"。可用: auth, doctor`, handled: true }
+}
+
+/** /feishu auth — device authorization flow for the sender. */
+async function feishuAuth(ctx: CommandContext): Promise<CommandResult> {
+  const client = ctx.client
+  try {
+    const auth = await requestDeviceAuthorization({
+      appId: client.account.appId,
+      appSecret: client.account.appSecret,
+      brand: client.account.brand,
+    })
+    // Poll in the background; store the token on success.
+    const openId = ctx.senderOpenId || 'self'
+    const { pollDeviceToken } = await import('../core/device-flow.ts')
+    const { setStoredToken } = await import('../core/token-store.ts')
+    void pollDeviceToken({
+      appId: client.account.appId,
+      appSecret: client.account.appSecret,
+      brand: client.account.brand,
+      deviceCode: auth.deviceCode,
+      interval: auth.interval,
+      expiresIn: auth.expiresIn,
+    }).then((result) => {
+      if (result.ok) {
+        setStoredToken(openId, {
+          accessToken: result.token.accessToken,
+          refreshToken: result.token.refreshToken,
+          expiresIn: result.token.expiresIn,
+          scope: result.token.scope,
+        })
+      }
+    }).catch((error: unknown) => {
+      const message = error instanceof Error ? error.message : String(error)
+      console.warn(`[harness-lark] /feishu auth poll failed: ${message}`)
+    })
+    return {
+      reply:
+        '✅ 已发起授权请求\n\n' +
+        `请在浏览器打开: ${auth.verificationUri}\n` +
+        `输入用户码: ${auth.userCode}\n` +
+        `（有效期 ${Math.round(auth.expiresIn / 60)} 分钟）`,
+      handled: true,
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    return { reply: `❌ 授权失败: ${message}`, handled: true }
+  }
+}
+
+/** /feishu doctor — diagnostics report. */
+async function feishuDoctor(ctx: CommandContext): Promise<CommandResult> {
+  const client = ctx.client
+  const account = client.account
+  const lines: string[] = ['🩺 飞书插件诊断报告', '']
+
+  // Credentials.
+  const appId = account.appId
+  const appSecret = account.appSecret
+  lines.push('📋 基础信息')
+  lines.push(`  app_id: ${appId || '（未设置）'}`)
+  lines.push(`  app_secret: ${appSecret ? '已设置 ✓' : '（未设置）✗'}`)
+  lines.push(`  平台: ${account.brand}`)
+  lines.push(`  连接模式: ${account.config.connectionMode}`)
+  lines.push('')
+
+  // Bot identity.
+  lines.push('🤖 机器人身份')
+  lines.push(`  bot open_id: ${client.botOpenId ?? '（未知，probe 未成功）'}`)
+  lines.push(`  bot 名称: ${client.botName ?? '（未知）'}`)
+  lines.push(`  WS 连接: ${client.wsConnected ? '已连接 ✓' : '未连接 ✗'}`)
+  lines.push('')
+
+  // Model config.
+  const sel = ctx.selection.current
+  lines.push('🧠 模型配置')
+  lines.push(`  当前模型: ${sel ? `${sel.provider}/${sel.model}` : '（默认）'}`)
+  lines.push(`  工作目录: ${ctx.cwd.value}`)
+  lines.push('')
+
+  // OAuth token status.
+  const openId = ctx.senderOpenId
+  if (openId) {
+    const { tokenStatus } = await import('../core/token-store.ts')
+    const status = tokenStatus(openId)
+    lines.push('🔐 用户授权')
+    lines.push(`  OAuth: ${status.authorized ? '已授权 ✓' : '未授权（可用 /feishu auth 发起）'}`)
+    lines.push('')
+  }
+
+  lines.push('💡 提示: /feishu auth 发起授权；/status 查看会话状态')
+  return { reply: lines.join('\n'), handled: true }
+}
+
 function help(): CommandResult {
   return {
     reply:
       '可用命令:\n' +
-      '  /status      查看当前模型、工作目录、会话状态\n' +
-      '  /model       查看可用模型（/model <provider/model> 切换）\n' +
-      '  /cd          查看/修改工作目录（/cd <绝对路径>）\n' +
-      '  /new         新建上下文（清空当前对话历史）\n' +
-      '  /permission  查看权限配置说明\n' +
-      '  /help        显示本帮助',
+      '  /status        查看当前模型、工作目录、会话状态\n' +
+      '  /model         查看可用模型（/model <provider/model> 切换）\n' +
+      '  /cd            查看/修改工作目录（/cd <绝对路径>）\n' +
+      '  /new           新建上下文（清空当前对话历史）\n' +
+      '  /feishu auth   发起飞书用户授权\n' +
+      '  /feishu doctor 运行飞书插件诊断\n' +
+      '  /permission    查看权限配置说明\n' +
+      '  /help          显示本帮助',
     handled: true,
   }
 }

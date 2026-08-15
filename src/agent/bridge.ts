@@ -153,6 +153,8 @@ export class AgentBridge {
       selection: record.selectionRef,
       cwd: cwdHolder,
       availableModels: await this.availableModels(),
+      client: this.opts.client(),
+      senderOpenId: message.senderOpenId,
     })
     if (commandResult.handled) {
       await this.replyText(record, commandResult.reply)
