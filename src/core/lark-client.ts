@@ -68,20 +68,19 @@ export class LarkClient {
     return this.wsClient != null
   }
 
-  /** Probe bot identity via the contact API. Safe to call repeatedly; caches result. */
+  /** Probe bot identity via the bot info API. Safe to call repeatedly; caches result. */
   async probe(): Promise<void> {
     if (this.botOpenIdInternal) return
     try {
-      const resp = (await this.sdk.contact.user.get({
-        params: { user_id_type: 'open_id' },
-        path: { user_id: this.account.appId },
-      } as never)) as unknown
-      // The bot's own open_id is not directly queryable; derive from the
-      // tenant-level contact endpoint instead. Fall back to app-scoped lookup.
-      const data = (resp as { data?: { user?: { open_id?: string; name?: string } } }).data
-      if (data?.user?.open_id) {
-        this.botOpenIdInternal = data.user.open_id
-        this.botNameInternal = data.user.name
+      // bot/v3/info returns the bot's own open_id and app name.
+      const resp = (await (this.sdk as never as {
+        request: (req: { method: string; url: string }) => Promise<unknown>
+      }).request({ method: 'GET', url: '/open-apis/bot/v3/info' })) as unknown
+      const data = (resp as { bot?: { open_id?: string; app_name?: string }; data?: { bot?: { open_id?: string; app_name?: string } } }).bot
+        ?? (resp as { data?: { bot?: { open_id?: string; app_name?: string } } }).data?.bot
+      if (data?.open_id) {
+        this.botOpenIdInternal = data.open_id
+        this.botNameInternal = data.app_name
       }
     } catch (error) {
       // Probe failure is non-fatal: the gateway still starts, and the

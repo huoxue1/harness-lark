@@ -11,6 +11,7 @@ describe('config schema', () => {
     dmPolicy: 'open',
     groupPolicy: 'disabled',
     requireMentionInGroups: true,
+    respondToMentionAll: false,
     topicSeparateSession: false,
     dedupTtlMs: 1000,
   }

@@ -119,7 +119,7 @@ export class AgentBridge {
     this.opts = opts
   }
 
-  /** Handle one inbound Feishu message: commands first, else route to the agent. */
+  /** Handle one inbound Feishu message: mention gate, then commands or agent. */
   async handleMessage(message: MessageContext): Promise<void> {
     if (this.closed) return
     const threadScoped = this.opts.config.topicSeparateSession && message.threadId !== undefined
@@ -127,6 +127,13 @@ export class AgentBridge {
       ? `${this.opts.accountId}:${message.chatId}:thread:${message.threadId}`
       : `${this.opts.accountId}:${message.chatId}`
     const sessionId = this.sessionIdFor(message, 0)
+
+    // ── Mention gate: group messages (commands included) need @bot unless
+    //    allowed. Apply before any agent creation or command handling. ─────
+    if (!this.shouldRespond(message)) {
+      blog('info', `message ${message.messageId} ignored (group mention gate)`)
+      return
+    }
 
     let record = this.records.get(key)
     if (!record) {
@@ -421,6 +428,19 @@ export class AgentBridge {
       attachmentHint += `\n[图片] image_key=${message.imageKey} message_id=${message.messageId}（可用 feishu_download_file 获取内容）`
     }
     return `${prefix}${message.text}${attachmentHint}`
+  }
+
+  /**
+   * Whether the bot should respond to this message. Group messages must
+   * @-mention the bot when `requireMentionInGroups` is on, unless the message
+   * is an @all and `respondToMentionAll` allows it. DMs always respond.
+   */
+  private shouldRespond(message: MessageContext): boolean {
+    if (message.chatType !== 'group') return true
+    if (!this.opts.config.requireMentionInGroups) return true
+    if (message.mentionedBot) return true
+    if (message.mentionAll && this.opts.config.respondToMentionAll) return true
+    return false
   }
 
   /** Session id for a message, thread-scoped when the toggle is on and a thread is present. */
