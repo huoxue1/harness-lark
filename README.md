@@ -36,6 +36,7 @@ English | [中文](README.zh.md) | [📖 安装文档（GitHub Pages）](https:/
 | `/cd` | 查看工作目录；`/cd <绝对路径>` 修改（下次会话/重启后生效） |
 | `/new` | 新建上下文（清空当前对话历史，别名 `/reset`） |
 | `/permission` | 查看/切换会话权限预设（`/permission <预设名>`，如 `danger-full-access`） |
+| `/setting` | 查看设置项；`/setting permission [预设名]` 设置新会话默认权限 |
 | `/help` | 列出所有命令 |
 
 ## 安装

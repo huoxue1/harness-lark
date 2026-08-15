@@ -1,15 +1,18 @@
 /**
- * Slash-command handlers for harness-lark: /status, /model, /cd, /permission.
+ * Slash-command handlers for harness-lark: /status, /model, /cd, /permission,
+ * /setting.
  *
  * Commands are matched on inbound message text before it reaches the agent.
  * Each handler returns the reply text sent back to the chat (plain text, not
  * a model turn). State changes (model switch, cwd, permission preset) apply
- * to the chat's session and persist in the durable session log.
+ * to the chat's session and persist in the durable session log; /setting
+ * writes dsh settings, which persist across restarts.
  */
 
 import type { ModelSelection } from '@deepseek-ai/dsh-agent'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { Session, SessionEvent } from '@deepseek-ai/dsh-session'
+import { settingsNamespace, type SettingsProvider } from '@deepseek-ai/dsh-settings'
 import type { LarkClient } from '../core/lark-client.ts'
 import { resolveRequestScope } from '../core/app-scopes.ts'
 import { requestDeviceAuthorization } from '../core/device-flow.ts'
@@ -64,6 +67,8 @@ export async function runCommand(text: string, cmdCtx: CommandContext): Promise<
     case '/permission':
     case '/perm':
       return permission(arg, cmdCtx)
+    case '/setting':
+      return await setting(arg, cmdCtx)
     case '/new':
     case '/reset':
       return reset(cmdCtx)
@@ -177,6 +182,76 @@ function permission(arg: string, ctx: CommandContext): CommandResult {
   }
   return {
     reply: `✅ 会话权限已切换: ${arg}\n（对后续的工具调用生效，含 bash/文件操作）`,
+    handled: true,
+  }
+}
+
+/** The dsh permission settings namespace (registered by dsh-permission-presets). */
+const PERMISSION_SETTINGS_NAMESPACE = settingsNamespace('permission')
+
+/** Minimal face of the permission settings section. */
+interface PermissionSettingsSection {
+  /** Preset pinned into newly created sessions. */
+  defaultPreset?: string
+}
+
+/**
+ * /setting — inspect or change plugin/deployment settings.
+ * `permission` subcommand: read or write the default permission preset for
+ * new sessions. The value lives in the dsh settings document
+ * (`permission.defaultPreset`), so it persists across restarts and applies
+ * to sessions created after the change; existing sessions are untouched
+ * (switch those with /permission).
+ */
+async function setting(subcommand: string, ctx: CommandContext): Promise<CommandResult> {
+  const sub = subcommand.trim()
+  if (sub === '' || sub === 'permission') {
+    return await settingPermission('', ctx)
+  }
+  if (sub.startsWith('permission ')) {
+    return await settingPermission(sub.slice('permission '.length).trim(), ctx)
+  }
+  return {
+    reply: `未知设置项: "${sub}"。可用: permission（默认权限预设）`,
+    handled: true,
+  }
+}
+
+/** Read or write the default permission preset for new sessions. */
+async function settingPermission(arg: string, ctx: CommandContext): Promise<CommandResult> {
+  const settings = ctx.agent.ctx.get('settings') as SettingsProvider | undefined
+  if (settings === undefined) {
+    return { reply: '当前环境未注册 settings 服务，无法读取/设置默认权限。', handled: true }
+  }
+  const section = settings.get(PERMISSION_SETTINGS_NAMESPACE) as PermissionSettingsSection | undefined
+  if (!arg) {
+    const current = section?.defaultPreset ?? '（未设置，使用部署默认）'
+    const presets = ctx.agent.ctx.get('permissionPresets') as PermissionPresetsService | undefined
+    const names = presets === undefined ? [] : [...presets.names]
+    const lines = [
+      '⚙️ 默认权限设置',
+      `当前默认: ${current}`,
+      '',
+      '可用预设:',
+      ...(names.length > 0 ? names.map((name) => `  ${name}`) : ['  （权限预设服务不可用）']),
+      '',
+      '设置: /setting permission <预设名>，例如 /setting permission workspace-write',
+      '说明: 默认权限作用于新建会话；切换当前会话用 /permission',
+    ]
+    return { reply: lines.join('\n'), handled: true }
+  }
+  const presets = ctx.agent.ctx.get('permissionPresets') as PermissionPresetsService | undefined
+  if (presets !== undefined && !presets.names.includes(arg)) {
+    return { reply: `未知预设 "${arg}"。可用: ${presets.names.join(', ')}。`, handled: true }
+  }
+  try {
+    await settings.update(PERMISSION_SETTINGS_NAMESPACE, { defaultPreset: arg })
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    return { reply: `❌ 设置默认权限失败: ${message}`, handled: true }
+  }
+  return {
+    reply: `✅ 默认权限已设置为: ${arg}\n（作用于之后新建的会话；当前会话用 /permission 切换）`,
     handled: true,
   }
 }
@@ -324,6 +399,7 @@ function help(): CommandResult {
       '  /feishu auth   发起飞书用户授权\n' +
       '  /feishu doctor 运行飞书插件诊断\n' +
       '  /permission    查看/切换会话权限预设（/permission <预设名>）\n' +
+      '  /setting       查看设置项；/setting permission [预设名] 设置默认权限\n' +
       '  /help          显示本帮助',
     handled: true,
   }

@@ -1,10 +1,28 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { runCommand, type CommandContext } from '../src/agent/commands.ts'
+
+/** Minimal permission-presets service face for command tests. */
+function makePresets(current = 'workspace-write') {
+  return {
+    names: ['read-only', 'workspace-write', 'danger-full-access'],
+    current: () => current,
+    set: vi.fn(),
+  }
+}
+
+/** Minimal settings provider face for command tests. */
+function makeSettings(section?: { defaultPreset?: string }) {
+  return {
+    get: () => section,
+    update: vi.fn(async () => undefined),
+  }
+}
 
 function makeCtx(overrides: Partial<CommandContext> = {}): CommandContext {
   return {
     agent: {
-      session: { header: { id: 's1', cwd: '/work' } },
+      session: { header: { id: 's1', cwd: '/work' }, events: [] },
+      ctx: { get: () => undefined },
     } as unknown as CommandContext['agent'],
     selection: { current: { provider: 'deepseek-official', model: 'deepseek-v4-flash' } },
     cwd: { value: '/work' },
@@ -26,6 +44,14 @@ function makeCtx(overrides: Partial<CommandContext> = {}): CommandContext {
     senderOpenId: 'ou_test',
     ...overrides,
   }
+}
+
+/** Agent whose scoped ctx resolves named services. */
+function makeAgentWithServices(services: Record<string, unknown>): CommandContext['agent'] {
+  return {
+    session: { header: { id: 's1', cwd: '/work' }, events: [] },
+    ctx: { get: (name: string) => services[name] },
+  } as unknown as CommandContext['agent']
 }
 
 describe('slash commands', () => {
@@ -120,5 +146,72 @@ describe('slash commands', () => {
   it('unknown command returns a hint', async () => {
     const r = await runCommand('/bogus', makeCtx())
     expect(r.reply).toContain('未知命令')
+  })
+
+  it('/permission without service explains it is unavailable', async () => {
+    const r = await runCommand('/permission', makeCtx())
+    expect(r.handled).toBe(true)
+    expect(r.reply).toContain('未注册权限预设服务')
+  })
+
+  it('/permission lists presets and current', async () => {
+    const presets = makePresets('workspace-write')
+    const ctx = makeCtx({ agent: makeAgentWithServices({ permissionPresets: presets }) })
+    const r = await runCommand('/permission', ctx)
+    expect(r.handled).toBe(true)
+    expect(r.reply).toContain('workspace-write（当前）')
+    expect(r.reply).toContain('danger-full-access')
+  })
+
+  it('/permission switches the session preset', async () => {
+    const presets = makePresets()
+    const ctx = makeCtx({ agent: makeAgentWithServices({ permissionPresets: presets }) })
+    const r = await runCommand('/permission danger-full-access', ctx)
+    expect(r.handled).toBe(true)
+    expect(presets.set).toHaveBeenCalledWith(expect.anything(), 'danger-full-access')
+    expect(r.reply).toContain('danger-full-access')
+  })
+
+  it('/permission rejects an unknown preset', async () => {
+    const ctx = makeCtx({ agent: makeAgentWithServices({ permissionPresets: makePresets() }) })
+    const r = await runCommand('/permission bogus', ctx)
+    expect(r.reply).toContain('未知预设')
+  })
+
+  it('/setting without settings service explains it is unavailable', async () => {
+    const r = await runCommand('/setting permission', makeCtx())
+    expect(r.handled).toBe(true)
+    expect(r.reply).toContain('未注册 settings 服务')
+  })
+
+  it('/setting permission shows current default', async () => {
+    const settings = makeSettings({ defaultPreset: 'workspace-write' })
+    const ctx = makeCtx({ agent: makeAgentWithServices({ settings }) })
+    const r = await runCommand('/setting permission', ctx)
+    expect(r.handled).toBe(true)
+    expect(r.reply).toContain('workspace-write')
+  })
+
+  it('/setting permission writes the default preset', async () => {
+    const settings = makeSettings()
+    const ctx = makeCtx({ agent: makeAgentWithServices({ settings }) })
+    const r = await runCommand('/setting permission danger-full-access', ctx)
+    expect(r.handled).toBe(true)
+    expect(settings.update).toHaveBeenCalledWith(expect.anything(), { defaultPreset: 'danger-full-access' })
+    expect(r.reply).toContain('danger-full-access')
+  })
+
+  it('/setting permission validates the preset against the service', async () => {
+    const settings = makeSettings()
+    const presets = makePresets()
+    const ctx = makeCtx({ agent: makeAgentWithServices({ settings, permissionPresets: presets }) })
+    const r = await runCommand('/setting permission bogus', ctx)
+    expect(r.reply).toContain('未知预设')
+    expect(settings.update).not.toHaveBeenCalled()
+  })
+
+  it('/setting reports an unknown setting', async () => {
+    const r = await runCommand('/setting nonsense', makeCtx())
+    expect(r.reply).toContain('未知设置项')
   })
 })

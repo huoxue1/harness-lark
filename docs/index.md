@@ -36,5 +36,6 @@ docker run -d --name dsh-web \
 - `/feishu auth` — 用户 OAuth 授权（一次性，重启不丢）
 - `/feishu doctor` — 诊断报告
 - `/permission` — 查看/切换会话权限预设（如 `/permission danger-full-access`）
+- `/setting permission` — 查看/设置新会话默认权限预设（如 `/setting permission workspace-write`）
 
 完整说明见 [使用指南](usage)。

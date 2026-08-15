@@ -366,6 +366,7 @@ export class AgentBridge {
           throw new Error(
             `会话 "${sessionId}" 正在 Web 界面（或另一个入口）打开，dsh 同一时间只允许一个入口持有会话。` +
             `请先在网页端关闭/切换该会话，再重试。`,
+            { cause: createError },
           )
         }
         throw createError
