@@ -47,6 +47,13 @@ export interface HarnessLarkConfig {
   allowlist?: string[]
   /** Whether to accept messages that @mention the bot in groups. */
   requireMentionInGroups: boolean
+  /**
+   * Whether topic-group (话题群) messages get their own session per thread.
+   * When true, a message carrying a `thread_id` maps to a session id that
+   * includes the thread id, so each topic keeps an independent context.
+   * When false (default), all messages in a chat share one session.
+   */
+  topicSeparateSession: boolean
   /** Dedup TTL for WebSocket redelivered messages, ms. */
   dedupTtlMs: number
 }
@@ -84,5 +91,6 @@ export const Config: Schema<HarnessLarkConfig> = Schema.object({
   ]).default('disabled' as const),
   allowlist: Schema.array(Schema.string()).description('open_id allowlist for pairing/allowlist policies'),
   requireMentionInGroups: Schema.boolean().default(true),
+  topicSeparateSession: Schema.boolean().default(false).description('Topic-group messages get their own session per thread'),
   dedupTtlMs: Schema.number().default(12 * 60 * 60 * 1000).description('Dedup TTL for redelivered messages, ms'),
 })

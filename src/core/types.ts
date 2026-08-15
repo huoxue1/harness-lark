@@ -77,6 +77,8 @@ export interface MessageContext {
   chatId: string
   chatType: 'p2p' | 'group'
   threadId?: string
+  /** Topic root message id — replying to it keeps the reply inside the thread. */
+  rootId?: string
   senderOpenId: string
   senderName?: string
   /** True when the bot is explicitly @mentioned. */

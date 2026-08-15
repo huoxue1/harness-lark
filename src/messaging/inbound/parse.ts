@@ -58,7 +58,10 @@ export function parseMessageEvent(
     messageId: msgId,
     chatId,
     chatType: message.chat_type === 'group' ? 'group' : 'p2p',
-    threadId: message.thread_id || message.root_id || undefined,
+    // A real topic thread carries `thread_id` (omt_*); `root_id` alone is a
+    // quote-reply chain in a normal group, NOT a thread (do not thread on it).
+    threadId: message.thread_id || undefined,
+    rootId: message.root_id || undefined,
     senderOpenId: event.sender?.sender_id?.open_id ?? '',
     mentions: mentionList,
     mentionedBot,

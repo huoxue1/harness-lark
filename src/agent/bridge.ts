@@ -50,6 +50,11 @@ export function sessionIdForChat(accountId: string, chatId: string, generation =
     : SessionId(`lark:${accountId}:${chatId}:${generation}`)
 }
 
+/** Session id for a topic-thread message (thread-scoped context). */
+export function sessionIdForThread(accountId: string, chatId: string, threadId: string, generation = 0): SessionId {
+  return SessionId(`lark:${accountId}:${chatId}:thread:${threadId}${generation === 0 ? '' : `:${generation}`}`)
+}
+
 /** Per-chat bridge state. */
 interface ChatRecord {
   agent: Agent
@@ -65,6 +70,10 @@ interface ChatRecord {
   streamingCard?: StreamingCard
   /** Message id anchor for static replies within one turn. */
   replyAnchor?: string
+  /** The user message to reply to — threads under it when in a topic thread. */
+  replyTargetId?: string
+  /** Whether the current message is inside a topic thread (thread_id present). */
+  inThread?: boolean
   /** Per-turn token metrics for the card footer. */
   metrics: {
     inputTokens: number
@@ -113,8 +122,11 @@ export class AgentBridge {
   /** Handle one inbound Feishu message: commands first, else route to the agent. */
   async handleMessage(message: MessageContext): Promise<void> {
     if (this.closed) return
-    const key = `${this.opts.accountId}:${message.chatId}`
-    const sessionId = sessionIdForChat(this.opts.accountId, message.chatId)
+    const threadScoped = this.opts.config.topicSeparateSession && message.threadId !== undefined
+    const key = threadScoped
+      ? `${this.opts.accountId}:${message.chatId}:thread:${message.threadId}`
+      : `${this.opts.accountId}:${message.chatId}`
+    const sessionId = this.sessionIdFor(message, 0)
 
     let record = this.records.get(key)
     if (!record) {
@@ -122,6 +134,9 @@ export class AgentBridge {
       record = await this.ensureAgent(sessionId, key, message, process.cwd(), 0)
       blog('info', `agent ready for ${key}`)
     }
+    // Track the message to reply to + whether it is inside a topic thread.
+    record.replyTargetId = message.messageId
+    record.inThread = message.threadId !== undefined
 
     // ── Slash commands: handled locally, no model turn, no card ──────────
     const text = this.renderUserText(message)
@@ -140,7 +155,7 @@ export class AgentBridge {
       if (commandResult.resetContext) {
         blog('info', `/new requested for ${key}, resetting context (generation ${record.generation} -> ${record.generation + 1})`)
         const nextGeneration = record.generation + 1
-        const newSessionId = sessionIdForChat(this.opts.accountId, message.chatId, nextGeneration)
+        const newSessionId = this.sessionIdFor(message, nextGeneration)
         const keepCwd = record.cwd
         await record.dispose()
         this.records.delete(key)
@@ -156,7 +171,7 @@ export class AgentBridge {
         blog('info', `cwd changed -> ${record.cwd}, rebuilding agent for ${key}`)
         await record.dispose()
         this.records.delete(key)
-        record = await this.ensureAgent(sessionIdForChat(this.opts.accountId, message.chatId, record.generation), key, message, record.cwd, record.generation)
+        record = await this.ensureAgent(this.sessionIdFor(message, record.generation), key, message, record.cwd, record.generation)
         this.records.set(key, record)
       }
       return
@@ -167,6 +182,8 @@ export class AgentBridge {
       const card = new StreamingCard({
         client: this.opts.client(),
         chatId: message.chatId,
+        replyTargetId: message.messageId,
+        replyInThread: message.threadId !== undefined,
         title: 'DeepSeek Agent',
         footer: {
           status: true,
@@ -196,6 +213,8 @@ export class AgentBridge {
       receiveId: record.chatId,
       receiveIdType: 'chat_id',
       text,
+      replyToMessageId: record.replyTargetId,
+      replyInThread: record.inThread ?? false,
     })
     if (!result.ok) {
       blog('warn', `command reply failed to ${record.chatId}: ${result.error}`)
@@ -357,7 +376,8 @@ export class AgentBridge {
         receiveId: record.chatId,
         receiveIdType: 'chat_id',
         text,
-        replyToMessageId: record.replyAnchor,
+        replyToMessageId: record.replyAnchor ?? record.replyTargetId,
+        replyInThread: record.replyAnchor === undefined && (record.inThread ?? false),
       }
       const result = await sendText(sendParams)
       if (result.messageId && !record.replyAnchor) {
@@ -393,6 +413,14 @@ export class AgentBridge {
     const sender = message.senderOpenId ? ` (from ${message.senderOpenId})` : ''
     const prefix = message.chatType === 'group' ? `[群聊${sender}] ` : ''
     return `${prefix}${message.text}`
+  }
+
+  /** Session id for a message, thread-scoped when the toggle is on and a thread is present. */
+  private sessionIdFor(message: MessageContext, generation: number): SessionId {
+    const threadScoped = this.opts.config.topicSeparateSession && message.threadId !== undefined
+    return threadScoped
+      ? sessionIdForThread(this.opts.accountId, message.chatId, message.threadId!, generation)
+      : sessionIdForChat(this.opts.accountId, message.chatId, generation)
   }
 
   private replyMode(): 'static' | 'streaming' {

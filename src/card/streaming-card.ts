@@ -29,6 +29,10 @@ export interface StreamingCardDeps {
   client: LarkClient
   /** Chat id the card is sent into. */
   chatId: string
+  /** User message to reply to. */
+  replyTargetId?: string
+  /** Reply inside the topic thread when the inbound message has a thread_id. */
+  replyInThread?: boolean
   /** Optional title for the card header. */
   title?: string
   /** Footer metric toggles for the complete card. */
@@ -76,6 +80,8 @@ export class StreamingCard {
       receiveId: this.deps.chatId,
       receiveIdType: 'chat_id',
       card,
+      replyToMessageId: this.deps.replyTargetId,
+      replyInThread: this.deps.replyInThread ?? false,
     })
     if (result.ok && result.messageId) {
       this.messageId = result.messageId
