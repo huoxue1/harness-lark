@@ -132,6 +132,8 @@ dsh plugin --profile web add harness-lark
 | `feishu_task_task` | 任务 CRUD/完成 |
 | `feishu_oauth` | 用户 OAuth 授权/状态/撤销 |
 
+> 用户数据类工具（云文档 `feishu_create_doc`/`fetch_doc`/`update_doc`，以及多维表格、电子表格、日历、任务系列工具）在用户执行 `/feishu auth` 授权后，以该用户的身份调用飞书 API；未授权时回退为机器人身份。Wiki/Drive/IM 类工具始终以机器人身份调用。
+
 ## 开发
 
 ```sh

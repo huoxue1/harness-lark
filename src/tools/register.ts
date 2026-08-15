@@ -8,6 +8,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { defineTool, type ToolRunContext } from '@deepseek-ai/dsh-tools'
 import type { LarkClient } from '../core/lark-client.ts'
+import { ToolClient } from '../core/tool-client.ts'
 
 /** A tool definition bound to the plugin's Lark client at execution time. */
 export interface LarkToolDef {
@@ -17,7 +18,12 @@ export interface LarkToolDef {
   /** Resolve the Lark client (from the active bridge account). */
   resolveClient: () => LarkClient
   /** Tool result — the raw SDK response shape is version-drifted, so `unknown`. */
-  execute: (args: Record<string, unknown>, client: LarkClient, exec: ToolRunContext) => Promise<unknown>
+  execute: (
+    args: Record<string, unknown>,
+    client: LarkClient,
+    exec: ToolRunContext,
+    tc: ToolClient,
+  ) => Promise<unknown>
   timeoutMs?: number
 }
 
@@ -40,9 +46,10 @@ export function registerLarkTool(ctx: Context, def: LarkToolDef): void {
     isConcurrencySafe: () => true,
     async execute(args, exec) {
       const client = def.resolveClient()
+      const tc = new ToolClient(client)
       // Tool results are dynamic JSON values assembled at runtime; the
       // executor validates them against the schema after execution.
-      return (await def.execute(args, client, exec)) as never
+      return (await def.execute(args, client, exec, tc)) as never
     },
   }))
 }

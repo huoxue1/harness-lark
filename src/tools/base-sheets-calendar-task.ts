@@ -3,10 +3,23 @@
  *
  * Implements the Base/表格/日历/任务 capability family against the Feishu
  * OAPI directly, following the openclaw-lark tool contracts.
+ *
+ * All tools call the SDK through `ToolClient`, so a request that runs inside
+ * a message turn uses the authorizing user's identity when they have run
+ * `/feishu auth`, falling back to the app identity otherwise.
+ *
+ * Notes on the two endpoints the SDK does not type:
+ * - Listing bitable apps goes through the Drive file API (`drive.file.list`)
+ *   filtered to `type === 'bitable'`; the Bitable API has no "list apps"
+ *   endpoint.
+ * - Reading/writing sheet cell values goes through the raw sheets v2 values
+ *   API (`ToolClient.invokeRaw`); the SDK's `spreadsheetSheet.get` returns
+ *   sheet metadata, not cell values, and has no range-write method.
  */
 
 import type { Context } from '@deepseek-ai/cordis'
 import type { LarkClient } from '../core/lark-client.ts'
+import type { ToolClient } from '../core/tool-client.ts'
 import { registerLarkTool } from './register.ts'
 
 export function registerBaseSheetsCalendarTaskTools(
@@ -17,20 +30,43 @@ export function registerBaseSheetsCalendarTaskTools(
 
   registerLarkTool(ctx, {
     name: 'feishu_bitable_app',
-    description: 'List Feishu Bitable (multi-dimensional table) apps visible to the bot.',
+    description:
+      'List Feishu Bitable (multi-dimensional table) apps in a folder. ' +
+      'Lists Drive files filtered to the bitable type (the Bitable API has no list-apps endpoint).',
     parameters: {
-      page_size: { type: 'integer', description: 'Max results (default 20).' },
+      folder_token: { type: 'string', description: 'Folder token (default: my space root).' },
+      page_size: { type: 'integer', description: 'Max results (default 50, max 200).' },
       page_token: { type: 'string', description: 'Pagination token.' },
     },
     resolveClient,
-    async execute(args, client) {
-      const response = await client.api.bitable.app.list({
-        params: {
-          page_size: typeof args.page_size === 'number' ? args.page_size : 20,
-          page_token: args.page_token ? String(args.page_token) : undefined,
-        } as never,
-      })
-      return (response.data as { items?: unknown[] } | undefined)?.items ?? []
+    async execute(args, _client, _exec, tc) {
+      const params: Record<string, unknown> = {
+        page_size: typeof args.page_size === 'number' ? args.page_size : 50,
+      }
+      if (args.folder_token) params.folder_token = String(args.folder_token)
+      if (args.page_token) params.page_token = String(args.page_token)
+
+      const response = await tc.invokeApi(async (api, opts) => api.drive.file.list({
+        params: params as never,
+      }, opts))
+      const data = response.data as {
+        files?: Array<{ token?: string; name?: string; type?: string; url?: string }>
+        has_more?: boolean
+        next_page_token?: string
+      } | undefined
+      const apps = (data?.files ?? [])
+        .filter((f) => f.type === 'bitable')
+        .map((f) => ({
+          ...(f.token !== undefined ? { token: f.token } : {}),
+          ...(f.name !== undefined ? { name: f.name } : {}),
+          ...(f.type !== undefined ? { type: f.type } : {}),
+          ...(f.url !== undefined ? { url: f.url } : {}),
+        }))
+      return {
+        apps,
+        has_more: data?.has_more ?? false,
+        ...(data?.next_page_token !== undefined ? { page_token: data.next_page_token } : {}),
+      }
     },
   })
 
@@ -42,12 +78,12 @@ export function registerBaseSheetsCalendarTaskTools(
       page_size: { type: 'integer', description: 'Max results (default 100).' },
     },
     resolveClient,
-    async execute(args, client) {
-      const response = await client.api.bitable.appTable.list({
+    async execute(args, _client, _exec, tc) {
+      const response = await tc.invokeApi(async (api, opts) => api.bitable.appTable.list({
         path: { app_token: String(args.app_token) },
         params: { page_size: typeof args.page_size === 'number' ? args.page_size : 100 } as never,
-      })
-      return (response.data as { items?: unknown[] } | undefined)?.items ?? []
+      }, opts))
+      return { items: (response.data as { items?: unknown[] } | undefined)?.items ?? [] }
     },
   })
 
@@ -71,7 +107,7 @@ export function registerBaseSheetsCalendarTaskTools(
       filter: { type: 'string', description: 'Filter formula for list (e.g. CurrentValue.[field]="x").' },
     },
     resolveClient,
-    async execute(args, client) {
+    async execute(args, _client, _exec, tc) {
       const appToken = String(args.app_token)
       const tableId = String(args.table_id)
       const action = String(args.action)
@@ -79,43 +115,43 @@ export function registerBaseSheetsCalendarTaskTools(
 
       switch (action) {
         case 'create': {
-          const response = await client.api.bitable.appTableRecord.create({
+          const response = await tc.invokeApi(async (api, opts) => api.bitable.appTableRecord.create({
             path: { app_token: appToken, table_id: tableId },
             data: { fields: (args.fields as Record<string, unknown>) ?? {} } as never,
-          })
-          return (response.data as { record?: unknown } | undefined)?.record ?? {}
+          }, opts))
+          return { record: (response.data as { record?: unknown } | undefined)?.record ?? {} }
         }
         case 'list': {
-          const response = await client.api.bitable.appTableRecord.list({
+          const response = await tc.invokeApi(async (api, opts) => api.bitable.appTableRecord.list({
             path: { app_token: appToken, table_id: tableId },
             params: {
               page_size: typeof args.page_size === 'number' ? args.page_size : 20,
               filter: args.filter ? String(args.filter) : undefined,
             } as never,
-          })
-          return (response.data as { items?: unknown[] } | undefined)?.items ?? []
+          }, opts))
+          return { items: (response.data as { items?: unknown[] } | undefined)?.items ?? [] }
         }
         case 'get': {
           if (!recordId) throw new Error('record: get requires record_id')
-          const response = await client.api.bitable.appTableRecord.get({
+          const response = await tc.invokeApi(async (api, opts) => api.bitable.appTableRecord.get({
             path: { app_token: appToken, table_id: tableId, record_id: recordId },
-          })
-          return (response.data as { record?: unknown } | undefined)?.record ?? {}
+          }, opts))
+          return { record: (response.data as { record?: unknown } | undefined)?.record ?? {} }
         }
         case 'update': {
           if (!recordId) throw new Error('record: update requires record_id')
-          const response = await client.api.bitable.appTableRecord.update({
+          const response = await tc.invokeApi(async (api, opts) => api.bitable.appTableRecord.update({
             path: { app_token: appToken, table_id: tableId, record_id: recordId },
             data: { fields: (args.fields as Record<string, unknown>) ?? {} } as never,
-          })
-          return (response.data as { record?: unknown } | undefined)?.record ?? {}
+          }, opts))
+          return { record: (response.data as { record?: unknown } | undefined)?.record ?? {} }
         }
         case 'delete': {
           if (!recordId) throw new Error('record: delete requires record_id')
-          const response = await client.api.bitable.appTableRecord.delete({
+          const response = await tc.invokeApi(async (api, opts) => api.bitable.appTableRecord.delete({
             path: { app_token: appToken, table_id: tableId, record_id: recordId },
-          })
-          return { deleted: true, response: response.data }
+          }, opts))
+          return { deleted: true, ...(response.data !== undefined ? { response: response.data } : {}) }
         }
         default:
           throw new Error(`record: unknown action "${action}"`)
@@ -131,11 +167,11 @@ export function registerBaseSheetsCalendarTaskTools(
       table_id: { type: 'string', required: true, description: 'Table id.' },
     },
     resolveClient,
-    async execute(args, client) {
-      const response = await client.api.bitable.appTableField.list({
+    async execute(args, _client, _exec, tc) {
+      const response = await tc.invokeApi(async (api, opts) => api.bitable.appTableField.list({
         path: { app_token: String(args.app_token), table_id: String(args.table_id) },
-      })
-      return (response.data as { items?: unknown[] } | undefined)?.items ?? []
+      }, opts))
+      return { items: (response.data as { items?: unknown[] } | undefined)?.items ?? [] }
     },
   })
 
@@ -147,11 +183,11 @@ export function registerBaseSheetsCalendarTaskTools(
       table_id: { type: 'string', required: true, description: 'Table id.' },
     },
     resolveClient,
-    async execute(args, client) {
-      const response = await client.api.bitable.appTableView.list({
+    async execute(args, _client, _exec, tc) {
+      const response = await tc.invokeApi(async (api, opts) => api.bitable.appTableView.list({
         path: { app_token: String(args.app_token), table_id: String(args.table_id) },
-      })
-      return (response.data as { items?: unknown[] } | undefined)?.items ?? []
+      }, opts))
+      return { items: (response.data as { items?: unknown[] } | undefined)?.items ?? [] }
     },
   })
 
@@ -160,7 +196,9 @@ export function registerBaseSheetsCalendarTaskTools(
   registerLarkTool(ctx, {
     name: 'feishu_sheet',
     description:
-      'Create, read, or write a Feishu spreadsheet. Set action to create / read / write.',
+      'Create, read, or write a Feishu spreadsheet. Set action to create / read / write. ' +
+      'read/write use the sheets v2 values API; range like "A1:C10" (the first worksheet is resolved automatically, ' +
+      'or include a sheet id prefix like "sheetId!A1:C10").',
     parameters: {
       action: {
         type: 'string',
@@ -171,35 +209,35 @@ export function registerBaseSheetsCalendarTaskTools(
       spreadsheet_token: { type: 'string', description: 'Spreadsheet token (for read/write).' },
       title: { type: 'string', description: 'Spreadsheet title (for create).' },
       range: { type: 'string', description: 'Cell range, e.g. A1:C10 (for read/write).' },
-      values: { type: 'array', items: { type: 'array', items: { type: 'string' } }, description: '2D array of values (for write).' },
+      values: { type: 'array', items: { type: 'array', items: { type: 'json' } }, description: '2D array of values (for write).' },
     },
     resolveClient,
-    async execute(args, client) {
+    async execute(args, _client, _exec, tc) {
       const action = String(args.action)
       switch (action) {
         case 'create': {
-          const response = await client.api.sheets.spreadsheet.create({
+          const response = await tc.invokeApi(async (api, opts) => api.sheets.spreadsheet.create({
             data: { title: args.title ? String(args.title) : 'New Sheet' } as never,
-          })
-          const data = response.data as { spreadsheet?: { spreadsheet_token?: string; url?: string } } | undefined
+          }, opts))
+          const spreadsheet = (response.data as { spreadsheet?: { spreadsheet_token?: string; url?: string } } | undefined)
+            ?.spreadsheet
           return {
-            spreadsheet_token: data?.spreadsheet?.spreadsheet_token,
-            url: data?.spreadsheet?.url,
+            ...(spreadsheet?.spreadsheet_token !== undefined ? { spreadsheet_token: spreadsheet.spreadsheet_token } : {}),
+            ...(spreadsheet?.url !== undefined ? { url: spreadsheet.url } : {}),
           }
         }
         case 'read': {
           if (!args.spreadsheet_token || !args.range) {
             throw new Error('sheet: read requires spreadsheet_token and range')
           }
-          // Read the raw range via values API.
-          const values = await readSheetRange(client, String(args.spreadsheet_token), String(args.range))
+          const values = await readSheetRange(tc, String(args.spreadsheet_token), String(args.range))
           return { values }
         }
         case 'write': {
           if (!args.spreadsheet_token || !args.range || !Array.isArray(args.values)) {
             throw new Error('sheet: write requires spreadsheet_token, range, and values')
           }
-          await writeSheetRange(client, String(args.spreadsheet_token), String(args.range), args.values)
+          await writeSheetRange(tc, String(args.spreadsheet_token), String(args.range), args.values)
           return { written: true }
         }
         default:
@@ -231,7 +269,7 @@ export function registerBaseSheetsCalendarTaskTools(
       page_size: { type: 'integer', description: 'Max results for list (default 20).' },
     },
     resolveClient,
-    async execute(args, client) {
+    async execute(args, _client, _exec, tc) {
       const action = String(args.action)
       const calendarId = args.calendar_id ? String(args.calendar_id) : undefined
       const eventId = args.event_id ? String(args.event_id) : undefined
@@ -245,7 +283,7 @@ export function registerBaseSheetsCalendarTaskTools(
           if (!args.summary || !args.start_time || !args.end_time) {
             throw new Error('event: create requires summary, start_time, and end_time')
           }
-          const response = await client.api.calendar.calendarEvent.create({
+          const response = await tc.invokeApi(async (api, opts) => api.calendar.calendarEvent.create({
             path,
             data: {
               summary: String(args.summary),
@@ -253,24 +291,24 @@ export function registerBaseSheetsCalendarTaskTools(
               start_time: { timestamp: String(args.start_time) },
               end_time: { timestamp: String(args.end_time) },
             } as never,
-          })
-          return (response.data as { event?: unknown } | undefined)?.event ?? {}
+          }, opts))
+          return { event: (response.data as { event?: unknown } | undefined)?.event ?? {} }
         }
         case 'list': {
-          const response = await client.api.calendar.calendarEvent.list({
+          const response = await tc.invokeApi(async (api, opts) => api.calendar.calendarEvent.list({
             path: { calendar_id: calendarId ?? 'primary' },
             params: { page_size: typeof args.page_size === 'number' ? args.page_size : 20 } as never,
-          })
-          return (response.data as { items?: unknown[] } | undefined)?.items ?? []
+          }, opts))
+          return { items: (response.data as { items?: unknown[] } | undefined)?.items ?? [] }
         }
         case 'get': {
           if (!eventId) throw new Error('event: get requires event_id')
-          const response = await client.api.calendar.calendarEvent.get({ path })
-          return (response.data as { event?: unknown } | undefined)?.event ?? {}
+          const response = await tc.invokeApi(async (api, opts) => api.calendar.calendarEvent.get({ path }, opts))
+          return { event: (response.data as { event?: unknown } | undefined)?.event ?? {} }
         }
         case 'update': {
           if (!eventId) throw new Error('event: update requires event_id')
-          const response = await client.api.calendar.calendarEvent.patch({
+          const response = await tc.invokeApi(async (api, opts) => api.calendar.calendarEvent.patch({
             path,
             data: {
               summary: args.summary ? String(args.summary) : undefined,
@@ -278,12 +316,12 @@ export function registerBaseSheetsCalendarTaskTools(
               start_time: args.start_time ? { timestamp: String(args.start_time) } : undefined,
               end_time: args.end_time ? { timestamp: String(args.end_time) } : undefined,
             } as never,
-          })
-          return (response.data as { event?: unknown } | undefined)?.event ?? {}
+          }, opts))
+          return { event: (response.data as { event?: unknown } | undefined)?.event ?? {} }
         }
         case 'delete': {
           if (!eventId) throw new Error('event: delete requires event_id')
-          await client.api.calendar.calendarEvent.delete({ path })
+          await tc.invokeApi(async (api, opts) => api.calendar.calendarEvent.delete({ path }, opts))
           return { deleted: true }
         }
         default:
@@ -313,34 +351,34 @@ export function registerBaseSheetsCalendarTaskTools(
       completed: { type: 'boolean', description: 'Whether the task is complete (for update).' },
     },
     resolveClient,
-    async execute(args, client) {
+    async execute(args, _client, _exec, tc) {
       const action = String(args.action)
       const taskId = args.task_id ? String(args.task_id) : undefined
 
       switch (action) {
         case 'create': {
           if (!args.summary) throw new Error('task: create requires summary')
-          const response = await client.api.task.task.create({
+          const response = await tc.invokeApi(async (api, opts) => api.task.task.create({
             data: {
               summary: String(args.summary),
               description: args.description ? String(args.description) : undefined,
               due: args.due_time ? { timestamp: String(args.due_time) } : undefined,
             } as never,
-          })
-          return (response.data as { task?: unknown } | undefined)?.task ?? {}
+          }, opts))
+          return { task: (response.data as { task?: unknown } | undefined)?.task ?? {} }
         }
         case 'list': {
-          const response = await client.api.task.task.list({ data: {} as never })
-          return (response.data as { items?: unknown[] } | undefined)?.items ?? []
+          const response = await tc.invokeApi(async (api, opts) => api.task.task.list({ data: {} as never }, opts))
+          return { items: (response.data as { items?: unknown[] } | undefined)?.items ?? [] }
         }
         case 'get': {
           if (!taskId) throw new Error('task: get requires task_id')
-          const response = await client.api.task.task.get({ path: { task_id: taskId } })
-          return (response.data as { task?: unknown } | undefined)?.task ?? {}
+          const response = await tc.invokeApi(async (api, opts) => api.task.task.get({ path: { task_id: taskId } }, opts))
+          return { task: (response.data as { task?: unknown } | undefined)?.task ?? {} }
         }
         case 'update': {
           if (!taskId) throw new Error('task: update requires task_id')
-          const response = await client.api.task.task.patch({
+          const response = await tc.invokeApi(async (api, opts) => api.task.task.patch({
             path: { task_id: taskId },
             data: {
               summary: args.summary ? String(args.summary) : undefined,
@@ -348,16 +386,17 @@ export function registerBaseSheetsCalendarTaskTools(
               due: args.due_time ? { timestamp: String(args.due_time) } : undefined,
               completed_at: args.completed === true ? String(Date.now()) : undefined,
             } as never,
-          })
-          return (response.data as { task?: unknown } | undefined)?.task ?? {}
+          }, opts))
+          return { task: (response.data as { task?: unknown } | undefined)?.task ?? {} }
         }
         case 'complete': {
           if (!taskId) throw new Error('task: complete requires task_id')
-          const response = await client.api.task.task.patch({
+          const response = await tc.invokeApi(async (api, opts) => api.task.task.patch({
             path: { task_id: taskId },
             data: { completed_at: String(Date.now()) } as never,
-          })
-          return { completed: true, task: (response.data as { task?: unknown } | undefined)?.task }
+          }, opts))
+          const task = (response.data as { task?: unknown } | undefined)?.task
+          return { completed: true, ...(task !== undefined ? { task } : {}) }
         }
         default:
           throw new Error(`task: unknown action "${action}"`)
@@ -366,32 +405,46 @@ export function registerBaseSheetsCalendarTaskTools(
   })
 }
 
-/** Read a sheet range as a 2D array of values. */
-async function readSheetRange(client: LarkClient, token: string, range: string): Promise<unknown[][]> {
-  const response = await client.api.sheets.spreadsheetSheet.query({
+/** Resolve the first worksheet id of a spreadsheet (for range auto-prefix). */
+async function resolveFirstSheetId(tc: ToolClient, token: string): Promise<string | undefined> {
+  const response = await tc.invokeApi(async (api, opts) => api.sheets.spreadsheetSheet.query({
     path: { spreadsheet_token: token },
-  } as never)
+  } as never, opts))
   const data = response.data as { sheets?: Array<{ sheet_id?: string }> } | undefined
-  const sheetId = data?.sheets?.[0]?.sheet_id
-  if (!sheetId) return []
-  const values = await client.api.sheets.spreadsheetSheet.get({
-    path: { spreadsheet_token: token },
-    params: { range: `${sheetId}!${range}` } as never,
-  })
-  return (values.data as { valueRange?: { values?: unknown[][] } } | undefined)?.valueRange?.values ?? []
+  return data?.sheets?.[0]?.sheet_id
 }
 
-/** Write a 2D array of values into a sheet range. */
-async function writeSheetRange(client: LarkClient, token: string, range: string, values: unknown[]): Promise<void> {
-  const response = await client.api.sheets.spreadsheetSheet.query({
-    path: { spreadsheet_token: token },
-  } as never)
-  const data = response.data as { sheets?: Array<{ sheet_id?: string }> } | undefined
-  const sheetId = data?.sheets?.[0]?.sheet_id
-  if (!sheetId) throw new Error('sheet: no sheet found in spreadsheet')
-  await client.api.sheets.spreadsheetSheet.set({
-    path: { spreadsheet_token: token },
-    params: { range: `${sheetId}!${range}` } as never,
-    data: { values: values as never[][] } as never,
+/** Read a sheet range as a 2D array of values (sheets v2 values API). */
+async function readSheetRange(tc: ToolClient, token: string, range: string): Promise<unknown[][]> {
+  const sheetId = await resolveFirstSheetId(tc, token)
+  if (!sheetId) return []
+  const fullRange = range.includes('!') ? range : `${sheetId}!${range}`
+  const response = await tc.invokeRaw<{
+    code?: number
+    msg?: string
+    data?: { valueRange?: { values?: unknown[][] } }
+  }>({
+    method: 'GET',
+    url: `/open-apis/sheets/v2/spreadsheets/${token}/values/${encodeURIComponent(fullRange)}`,
+    params: { valueRenderOption: 'ToString', dateTimeRenderOption: 'FormattedString' },
   })
+  if (response.code && response.code !== 0) {
+    throw new Error(`sheet read failed: ${response.msg ?? `code ${response.code}`}`)
+  }
+  return response.data?.valueRange?.values ?? []
+}
+
+/** Write a 2D array of values into a sheet range (sheets v2 values API). */
+async function writeSheetRange(tc: ToolClient, token: string, range: string, values: unknown[]): Promise<void> {
+  const sheetId = await resolveFirstSheetId(tc, token)
+  if (!sheetId) throw new Error('sheet: no sheet found in spreadsheet')
+  const fullRange = range.includes('!') ? range : `${sheetId}!${range}`
+  const response = await tc.invokeRaw<{ code?: number; msg?: string }>({
+    method: 'PUT',
+    url: `/open-apis/sheets/v2/spreadsheets/${token}/values`,
+    data: { valueRange: { range: fullRange, values } },
+  })
+  if (response.code && response.code !== 0) {
+    throw new Error(`sheet write failed: ${response.msg ?? `code ${response.code}`}`)
+  }
 }

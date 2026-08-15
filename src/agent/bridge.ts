@@ -27,6 +27,7 @@ import type { MessageContext } from '../core/types.ts'
 import { sendText, type SendMessageParams } from '../messaging/outbound/deliver.ts'
 import { addReaction, removeReaction, removeReactionByEmoji } from '../messaging/outbound/reactions.ts'
 import type { LarkClient } from '../core/lark-client.ts'
+import { runWithSender } from '../core/sender-context.ts'
 import { StreamingCard } from '../card/streaming-card.ts'
 import type { FooterSessionMetrics } from '../card/builder.ts'
 import { runCommand } from './commands.ts'
@@ -212,7 +213,11 @@ export class AgentBridge {
       source: { kind: 'user' },
     })
     blog('info', `followup to ${key}: ${text.slice(0, 60)}`)
-    record.agent.followup(userMessage)
+    // Record the sender so tools running inside this turn can act on the
+    // user's behalf (user-scoped Feishu API calls).
+    runWithSender(message.senderOpenId, () => {
+      record.agent.followup(userMessage)
+    })
   }
 
   /** Send a plain-text reply into the chat (for commands). */

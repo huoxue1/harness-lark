@@ -8,6 +8,7 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import type { LarkClient } from '../core/lark-client.ts'
+import { resolveRequestScope } from '../core/app-scopes.ts'
 import { requestDeviceAuthorization } from '../core/device-flow.ts'
 import { revokeStoredToken, setStoredToken, tokenStatus } from '../core/token-store.ts'
 import { registerLarkTool } from './register.ts'
@@ -56,16 +57,29 @@ export function registerOAuthTool(ctx: Context, resolveClient: () => LarkClient)
     },
     timeoutMs: 300_000,
     resolveClient,
-    async execute(args, client) {
+    async execute(args, client, _exec, tc) {
       const action = String(args.action)
-      const openId = args.open_id ? String(args.open_id) : 'self'
+      // Default to the current message sender; the explicit open_id is for
+      // checking/authorizing other users.
+      const openId = args.open_id ? String(args.open_id) : (tc.senderOpenId ?? 'self')
 
       switch (action) {
         case 'authorize': {
+          // Request only the scopes the app has actually granted (dynamic filter).
+          const { scope, filteredOut, permissionUrl } = await resolveRequestScope(client)
+          if (!scope.trim()) {
+            return {
+              error: 'app_scopes_not_granted',
+              message: `应用未开通任何所需的用户权限，无法发起授权。请先在开放平台开通：${permissionUrl}`,
+              unavailable_scopes: filteredOut,
+              app_permission_url: permissionUrl,
+            }
+          }
           const auth = await requestDeviceAuthorization({
             appId: client.account.appId,
             appSecret: client.account.appSecret,
             brand: client.account.brand,
+            scope,
           })
           // Store the flow handle for later token persistence; the actual
           // token arrives when the user completes the flow, which the plugin
@@ -83,6 +97,12 @@ export function registerOAuthTool(ctx: Context, resolveClient: () => LarkClient)
             user_code: auth.userCode,
             expires_in: auth.expiresIn,
             instructions: `Open ${auth.verificationUri} and enter code ${auth.userCode} to authorize.`,
+            ...(filteredOut.length > 0
+              ? {
+                  filtered_out_scopes: filteredOut,
+                  note: `Skipped ${filteredOut.length} scope(s) the app has not granted; enable them at ${permissionUrl} and re-authorize to use those capabilities.`,
+                }
+              : {}),
           }
         }
         case 'status':

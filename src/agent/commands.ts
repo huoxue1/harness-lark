@@ -10,7 +10,9 @@
 import type { ModelSelection } from '@deepseek-ai/dsh-agent'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { LarkClient } from '../core/lark-client.ts'
+import { resolveRequestScope } from '../core/app-scopes.ts'
 import { requestDeviceAuthorization } from '../core/device-flow.ts'
+import { USER_SCOPES } from '../core/tool-scopes.ts'
 
 /** Per-chat mutable state a command handler may read or mutate. */
 export interface CommandContext {
@@ -171,10 +173,22 @@ async function feishu(subcommand: string, ctx: CommandContext): Promise<CommandR
 async function feishuAuth(ctx: CommandContext): Promise<CommandResult> {
   const client = ctx.client
   try {
+    // Request only the scopes the app has actually granted (dynamic filter).
+    const { scope, filteredOut, permissionUrl } = await resolveRequestScope(client)
+    if (!scope.trim()) {
+      return {
+        reply:
+          '❌ 无法发起授权：应用未开通任何所需的用户权限。\n' +
+          `请在开放平台开通后重试：${permissionUrl}\n` +
+          `需要的权限：${USER_SCOPES.join(', ')}`,
+        handled: true,
+      }
+    }
     const auth = await requestDeviceAuthorization({
       appId: client.account.appId,
       appSecret: client.account.appSecret,
       brand: client.account.brand,
+      scope,
     })
     // Poll in the background; store the token on success.
     const openId = ctx.senderOpenId || 'self'
@@ -200,12 +214,16 @@ async function feishuAuth(ctx: CommandContext): Promise<CommandResult> {
       const message = error instanceof Error ? error.message : String(error)
       console.warn(`[harness-lark] /feishu auth poll failed: ${message}`)
     })
+    const filteredNote = filteredOut.length > 0
+      ? `\n\n（已跳过应用未开通的 ${filteredOut.length} 项权限：${filteredOut.join(', ')}；如需开通：${permissionUrl}）`
+      : ''
     return {
       reply:
         '✅ 已发起授权请求\n\n' +
         `请在浏览器打开: ${auth.verificationUri}\n` +
         `输入用户码: ${auth.userCode}\n` +
-        `（有效期 ${Math.round(auth.expiresIn / 60)} 分钟）`,
+        `（有效期 ${Math.round(auth.expiresIn / 60)} 分钟）` +
+        filteredNote,
       handled: true,
     }
   } catch (error) {

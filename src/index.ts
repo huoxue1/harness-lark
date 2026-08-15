@@ -15,10 +15,12 @@ import type {} from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-llm'
 import type {} from '@deepseek-ai/dsh-tools'
+import Schema from '@deepseek-ai/schemastery'
 import { AgentBridge } from './agent/bridge.ts'
 import { monitorFeishuProvider } from './channel/monitor.ts'
 import { Config, type HarnessLarkConfig } from './core/config-schema.ts'
 import { LarkClient } from './core/lark-client.ts'
+import { hydrateTokens, initTokenPersistence, type StoredTokenRecord } from './core/token-store.ts'
 import { registerFeishuTools } from './tools/index.ts'
 
 export { Config }
@@ -60,6 +62,12 @@ export const inject = ['agents', 'tools']
 export function apply(ctx: Context, config: HarnessLarkConfig): void {
   const logger = ctx.logger
   const accountId = 'default'
+
+  // Persist user OAuth tokens through dsh's built-in settings store (a
+  // `harness-lark` namespace in `~/.dsh/settings.yaml`, inside the persisted
+  // data volume) so authorization survives process restarts. Optional: when no
+  // settings service is mounted, tokens stay in memory for the session.
+  installTokenPersistence(ctx)
 
   // No credentials configured: mount the tool family so agents can still use
   // Feishu APIs when a deployment supplies credentials later, but skip the
@@ -120,4 +128,41 @@ export function apply(ctx: Context, config: HarnessLarkConfig): void {
   })
 
   logger.info(`[harness-lark] mounted (brand=${config.brand}, mode=${config.connectionMode})`)
+}
+
+/** One user token record persisted under the `harness-lark` settings namespace. */
+const UatTokenRecordSchema = Schema.object({
+  accessToken: Schema.string(),
+  refreshToken: Schema.string(),
+  expiresAt: Schema.number(),
+  refreshExpiresAt: Schema.number(),
+  scope: Schema.string(),
+})
+
+/** Settings namespace section: `{ tokens: { [openId]: record } }`. */
+const UatSectionSchema = Schema.object({
+  tokens: Schema.dict(UatTokenRecordSchema).default({}),
+})
+
+/**
+ * Wire the in-memory token store to dsh's `ctx.settings` store: hydrate from
+ * the persisted document at startup and write every mutation through. A no-op
+ * when no settings service is mounted (tests, minimal profiles).
+ */
+function installTokenPersistence(ctx: Context): void {
+  ctx.inject(['settings'], (sctx) => {
+    const scope = sctx.settings.register('harness-lark', UatSectionSchema)
+    const section = scope.get() as { tokens?: Record<string, unknown> }
+    hydrateTokens(
+      Object.entries(section.tokens ?? {}).map(([openId, token]) => ({
+        openId,
+        token: token as StoredTokenRecord,
+      })),
+    )
+    initTokenPersistence(async (entries) => {
+      const tokens: Record<string, unknown> = {}
+      for (const { openId, token } of entries) tokens[openId] = token
+      await scope.replace({ tokens })
+    })
+  })
 }
