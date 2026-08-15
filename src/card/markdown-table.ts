@@ -14,7 +14,7 @@
  */
 
 /** One Feishu card element (markdown or table component). */
-export type CardElement = Record<string, unknown>
+export type CardElement = { tag: string; [key: string]: unknown }
 
 /** Max rows per Feishu table component (API limit is 1-10). */
 const FEISHU_TABLE_PAGE_SIZE_MAX = 10
