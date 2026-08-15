@@ -13,12 +13,27 @@ PROFILE_DIR="$DSH_HOME/profiles/web"
 PROFILE_PATCH="$PROFILE_DIR/cordis.patch.yml"
 PLUGIN_SRC=/plugins/harness-lark
 
+install_plugin() {
+  dsh plugin --profile web add "file:$PLUGIN_SRC" > /tmp/plugin-install.log 2>&1
+}
+
 if [ ! -f "$PROFILE_DIR/.harness-lark-installed" ]; then
   echo '[entrypoint] installing harness-lark plugin...'
-  dsh plugin --profile web add "file:$PLUGIN_SRC" > /tmp/plugin-install.log 2>&1 || {
-    echo '[entrypoint] plugin add failed:'
-    tail -5 /tmp/plugin-install.log
-  }
+  if ! install_plugin; then
+    # The npm dsh profile template leaves `allowBuilds.protobufjs` as the
+    # placeholder text "set this to true or false"; pnpm then blocks that
+    # build script and plugin add fails. Protobufjs's postinstall is a
+    # harmless regeneration (production profiles set it to true), so patch
+    # the value and retry once before giving up loud.
+    echo '[entrypoint] plugin add failed, patching allowBuilds.protobufjs and retrying...'
+    sed -i 's/^\([[:space:]]*protobufjs:\).*$/\1 true/' "$PROFILE_DIR/pnpm-workspace.yaml" || true
+    if ! install_plugin; then
+      echo '[entrypoint] FATAL: harness-lark plugin install failed:'
+      tail -10 /tmp/plugin-install.log
+      exit 1
+    fi
+  fi
+
   mkdir -p "$PROFILE_DIR"
   cat > "$PROFILE_PATCH" << 'PATCH'
 # harness-lark Feishu channel (managed by docker-entrypoint.sh)
