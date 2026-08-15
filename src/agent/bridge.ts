@@ -42,8 +42,12 @@ function blog(level: 'info' | 'warn' | 'error', msg: string): void {
 }
 
 /** Stable dsh session id derived from the Feishu conversation identity. */
-export function sessionIdForChat(accountId: string, chatId: string): SessionId {
-  return SessionId(`lark:${accountId}:${chatId}`)
+export function sessionIdForChat(accountId: string, chatId: string, generation = 0): SessionId {
+  // Generation 0 keeps the original id for backward compatibility with
+  // already-persisted sessions; a /new bumps it to mint a fresh session.
+  return generation === 0
+    ? SessionId(`lark:${accountId}:${chatId}`)
+    : SessionId(`lark:${accountId}:${chatId}:${generation}`)
 }
 
 /** Per-chat bridge state. */
@@ -53,6 +57,10 @@ interface ChatRecord {
   /** The chat id the agent replies into. */
   chatId: string
   chatType: 'p2p' | 'group'
+  /** The live agent/session id (generation-suffixed after /new). */
+  sessionId: SessionId
+  /** Context generation: bumped by /new to mint a fresh session. */
+  generation: number
   /** Active streaming card for the current turn, when in streaming mode. */
   streamingCard?: StreamingCard
   /** Message id anchor for static replies within one turn. */
@@ -111,7 +119,7 @@ export class AgentBridge {
     let record = this.records.get(key)
     if (!record) {
       blog('info', `creating agent for ${key}...`)
-      record = await this.ensureAgent(sessionId, key, message, process.cwd())
+      record = await this.ensureAgent(sessionId, key, message, process.cwd(), 0)
       blog('info', `agent ready for ${key}`)
     }
 
@@ -126,6 +134,21 @@ export class AgentBridge {
     })
     if (commandResult.handled) {
       await this.replyText(record, commandResult.reply)
+      // /new: dispose the current agent and mint a fresh session, keeping cwd
+      // and model selection. The generation bump ensures a new session id, so
+      // resume cannot reload the old context.
+      if (commandResult.resetContext) {
+        blog('info', `/new requested for ${key}, resetting context (generation ${record.generation} -> ${record.generation + 1})`)
+        const nextGeneration = record.generation + 1
+        const newSessionId = sessionIdForChat(this.opts.accountId, message.chatId, nextGeneration)
+        const keepCwd = record.cwd
+        await record.dispose()
+        this.records.delete(key)
+        this.sessions.delete(record.sessionId)
+        record = await this.ensureAgent(newSessionId, key, message, keepCwd, nextGeneration)
+        this.records.set(key, record)
+        return
+      }
       // /cd changed the working directory: rebuild the agent so the next
       // turn (and shell/fs tools) run in the new directory.
       if (cwdHolder.value !== record.cwd) {
@@ -133,7 +156,7 @@ export class AgentBridge {
         blog('info', `cwd changed -> ${record.cwd}, rebuilding agent for ${key}`)
         await record.dispose()
         this.records.delete(key)
-        record = await this.ensureAgent(sessionId, key, message, record.cwd)
+        record = await this.ensureAgent(sessionIdForChat(this.opts.accountId, message.chatId, record.generation), key, message, record.cwd, record.generation)
         this.records.set(key, record)
       }
       return
@@ -218,6 +241,7 @@ export class AgentBridge {
     key: string,
     firstMessage: MessageContext,
     cwd: string,
+    generation: number,
   ): Promise<ChatRecord> {
     const agents = this.ctx.agents
 
@@ -273,6 +297,8 @@ export class AgentBridge {
       dispose: () => handle!.dispose(),
       chatId: firstMessage.chatId,
       chatType: firstMessage.chatType,
+      sessionId,
+      generation,
       metrics: { inputTokens: 0, outputTokens: 0, cacheRead: 0, cacheWrite: 0 },
       selectionRef,
       cwd,

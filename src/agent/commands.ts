@@ -28,6 +28,8 @@ export interface CommandResult {
   reply: string
   /** True when the message was handled as a command (do not run the agent). */
   handled: boolean
+  /** True when /new requested: the bridge disposes the agent and rebuilds a fresh one. */
+  resetContext?: boolean
 }
 
 /**
@@ -53,6 +55,9 @@ export async function runCommand(text: string, cmdCtx: CommandContext): Promise<
     case '/permission':
     case '/perm':
       return permission(arg, cmdCtx)
+    case '/new':
+    case '/reset':
+      return reset(cmdCtx)
     case '/help':
       return help()
     default:
@@ -129,6 +134,15 @@ function permission(arg: string, ctx: CommandContext): CommandResult {
   }
 }
 
+function reset(ctx: CommandContext): CommandResult {
+  void ctx
+  return {
+    reply: '已新建上下文，之前的对话历史已清空。',
+    handled: true,
+    resetContext: true,
+  }
+}
+
 function help(): CommandResult {
   return {
     reply:
@@ -136,6 +150,7 @@ function help(): CommandResult {
       '  /status      查看当前模型、工作目录、会话状态\n' +
       '  /model       查看可用模型（/model <provider/model> 切换）\n' +
       '  /cd          查看/修改工作目录（/cd <绝对路径>）\n' +
+      '  /new         新建上下文（清空当前对话历史）\n' +
       '  /permission  查看权限配置说明\n' +
       '  /help        显示本帮助',
     handled: true,

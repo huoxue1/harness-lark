@@ -73,6 +73,18 @@ describe('slash commands', () => {
     expect(r.reply).toContain('绝对路径')
   })
 
+  it('/new resets context', async () => {
+    const r = await runCommand('/new', makeCtx())
+    expect(r.handled).toBe(true)
+    expect(r.resetContext).toBe(true)
+    expect(r.reply).toContain('新建上下文')
+  })
+
+  it('/reset is an alias for /new', async () => {
+    const r = await runCommand('/reset', makeCtx())
+    expect(r.resetContext).toBe(true)
+  })
+
   it('/help lists commands', async () => {
     const r = await runCommand('/help', makeCtx())
     expect(r.reply).toContain('/status')
