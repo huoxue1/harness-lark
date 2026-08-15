@@ -35,7 +35,7 @@ Lark/飞书渠道插件，为 [DeepSeek Harness](https://github.com/deepseek-ai/
 | `/model` | 列出可用模型；`/model <provider/model>` 切换 |
 | `/cd` | 查看工作目录；`/cd <绝对路径>` 修改（下次会话/重启后生效） |
 | `/new` | 新建上下文（清空当前对话历史，别名 `/reset`） |
-| `/permission` | 查看权限配置说明 |
+| `/permission` | 查看/切换会话权限预设（`/permission <预设名>`，如 `danger-full-access`） |
 | `/help` | 列出所有命令 |
 
 ## 安装

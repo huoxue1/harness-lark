@@ -111,6 +111,10 @@ export interface AgentBridgeOptions {
 export class AgentBridge {
   private readonly records = new Map<string, ChatRecord>()
   private readonly sessions = new Map<SessionId, string>()
+  /** Per-chat serialization: messages for one chat run one at a time, so a
+   * burst (e.g. a WebSocket reconnection backlog) never races two
+   * `ensureAgent` calls for the same session. */
+  private readonly chains = new Map<string, Promise<void>>()
   private ctx: Context
   private opts: AgentBridgeOptions
   private closed = false
@@ -127,6 +131,13 @@ export class AgentBridge {
     const key = threadScoped
       ? `${this.opts.accountId}:${message.chatId}:thread:${message.threadId}`
       : `${this.opts.accountId}:${message.chatId}`
+    const previous = this.chains.get(key) ?? Promise.resolve()
+    const run = previous.catch(() => undefined).then(() => this.handleMessageSerial(message, key))
+    this.chains.set(key, run)
+    await run
+  }
+
+  private async handleMessageSerial(message: MessageContext, key: string): Promise<void> {
     const sessionId = this.sessionIdFor(message, 0)
 
     // ── Mention gate: group messages (commands included) need @bot unless
@@ -305,17 +316,33 @@ export class AgentBridge {
 
     // Try resume first: a persisted session keeps context across restarts.
     let handle: { agent: Agent; dispose: () => Promise<void> } | undefined
-    try {
-      handle = await agents.resume({
-        resumeSessionId: sessionId,
-        agentOptions,
-        setup,
-      })
-    } catch (error) {
-      // Session not persisted or resume failed — create fresh.
-      const message = error instanceof Error ? error.message : String(error)
-      blog('warn', `resume failed for ${key}, creating: ${message}`)
-      handle = undefined
+    // A session can be LIVE in only one entry at a time (the Web GUI keeps an
+    // opened session live). When resume/create collide with a live handle
+    // elsewhere, wait briefly for the other entry to release it before giving
+    // up — a browser tab closing or navigating away releases the session.
+    const LIVE_COLLISION_RETRIES = 10
+    const LIVE_COLLISION_DELAY_MS = 2000
+    let collisionMessage: string | undefined
+    for (let attempt = 0; attempt < LIVE_COLLISION_RETRIES; attempt++) {
+      try {
+        handle = await agents.resume({
+          resumeSessionId: sessionId,
+          agentOptions,
+          setup,
+        })
+        break
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        if (!/while it is live|already exists/.test(message)) {
+          // Session not persisted or resume failed for another reason.
+          blog('warn', `resume failed for ${key}, creating: ${message}`)
+          handle = undefined
+          break
+        }
+        collisionMessage = message
+        blog('warn', `resume for ${key} collided with a live session, retrying (${attempt + 1}/${LIVE_COLLISION_RETRIES})`)
+        await new Promise((resolve) => setTimeout(resolve, LIVE_COLLISION_DELAY_MS))
+      }
     }
 
     if (!handle) {
@@ -335,6 +362,12 @@ export class AgentBridge {
       } catch (createError) {
         const message = createError instanceof Error ? createError.message : String(createError)
         blog('error', `agent create failed for ${key}: ${message}`)
+        if (collisionMessage !== undefined && /while it is live|already exists/.test(message)) {
+          throw new Error(
+            `会话 "${sessionId}" 正在 Web 界面（或另一个入口）打开，dsh 同一时间只允许一个入口持有会话。` +
+            `请先在网页端关闭/切换该会话，再重试。`,
+          )
+        }
         throw createError
       }
     }

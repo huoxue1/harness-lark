@@ -6,7 +6,8 @@
  * uploads a local path or URL and delivers it into the current chat.
  */
 
-import { readFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import type { ToolRunContext } from '@deepseek-ai/dsh-tools'
 import type { LarkClient } from '../core/lark-client.ts'
@@ -39,7 +40,9 @@ export function registerMediaTools(ctx: Context, resolveClient: () => LarkClient
     name: 'feishu_download_file',
     description:
       'Download the content of a file/image/audio attachment from a Feishu message. ' +
-      'Returns the file name and its text content (for text files) or a size/type summary (for binary files). ' +
+      'Saves the attachment into the session workspace (default: the session working directory, e.g. /src) ' +
+      'and returns the saved path plus the file name and a size/type summary. ' +
+      'The saved file can then be used by bash/filesystem tools. ' +
       'Use this when a message carries a file_key / image_key to read what the user attached.',
     parameters: {
       message_id: { type: 'string', required: true, description: 'The message id (om_xxx) that carries the attachment.' },
@@ -50,9 +53,10 @@ export function registerMediaTools(ctx: Context, resolveClient: () => LarkClient
         enum: ['file', 'image'],
         description: 'Resource type: file or image.',
       },
+      save_to: { type: 'string', description: 'Directory to save the file into (default: the session working directory).' },
     },
     resolveClient,
-    async execute(args, client) {
+    async execute(args, client, exec) {
       const messageId = String(args.message_id)
       const fileKey = String(args.file_key)
       const type = args.type === 'image' ? 'image' : 'file'
@@ -64,10 +68,23 @@ export function registerMediaTools(ctx: Context, resolveClient: () => LarkClient
         type,
       )
 
+      // Persist the attachment into the session workspace so bash/filesystem
+      // tools can act on it (the raw content summary alone cannot).
+      const workspace = args.save_to
+        ? String(args.save_to)
+        : (exec.agent?.session.header.cwd ?? process.cwd())
+      let savedPath: string | undefined
+      if (workspace) {
+        mkdirSync(workspace, { recursive: true })
+        savedPath = join(workspace, sanitizeFileName(fileName ?? 'download'))
+        writeFileSync(savedPath, buffer)
+      }
+
       return {
         file_name: fileName ?? '(unnamed)',
         size_bytes: buffer.length,
         content: bufferToString(buffer),
+        ...(savedPath !== undefined ? { saved_path: savedPath } : {}),
       }
     },
   })
@@ -128,6 +145,12 @@ function bufferToString(buffer: Buffer): string {
   }
   const truncated = buffer.length > MAX_BYTES
   return truncated ? `${decoded}\n...[truncated, ${buffer.length} bytes total]` : decoded
+}
+
+/** Make an attachment file name safe for a local filesystem path. */
+function sanitizeFileName(name: string): string {
+  const safe = name.replace(/[\\/]/g, '_').replace(/[^\w.\- ]/g, '_')
+  return safe.slice(0, 200) || 'download'
 }
 
 /** Resolve a path_or_url to image bytes. */

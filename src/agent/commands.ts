@@ -3,12 +3,13 @@
  *
  * Commands are matched on inbound message text before it reaches the agent.
  * Each handler returns the reply text sent back to the chat (plain text, not
- * a model turn). State changes (model switch, cwd) apply to the chat's record
- * and persist for the process lifetime.
+ * a model turn). State changes (model switch, cwd, permission preset) apply
+ * to the chat's session and persist in the durable session log.
  */
 
 import type { ModelSelection } from '@deepseek-ai/dsh-agent'
 import type { Agent } from '@deepseek-ai/dsh-agent'
+import type { Session, SessionEvent } from '@deepseek-ai/dsh-session'
 import type { LarkClient } from '../core/lark-client.ts'
 import { resolveRequestScope } from '../core/app-scopes.ts'
 import { requestDeviceAuthorization } from '../core/device-flow.ts'
@@ -129,17 +130,53 @@ function cd(arg: string, ctx: CommandContext): CommandResult {
   return { reply: `工作目录已切换: ${arg}（下次会话/重启后生效，当前会话仍为原目录）`, handled: true }
 }
 
+/** Minimal structural face of the dsh permission-presets service. */
+interface PermissionPresetsService {
+  /** Every switchable preset name. */
+  readonly names: readonly string[]
+  /** The effective preset for a session's event log. */
+  current(events: readonly SessionEvent[]): string
+  /** Record a changed preset and update the session's sandbox/approval knobs. */
+  set(session: Session, name: string): void
+}
+
 function permission(arg: string, ctx: CommandContext): CommandResult {
-  // Placeholder for permission management; the real enforcement is config.
-  void arg
-  void ctx
+  const presets = ctx.agent.ctx.get('permissionPresets') as PermissionPresetsService | undefined
+  if (presets === undefined) {
+    return {
+      reply: '当前环境未注册权限预设服务（permissionPresets），无法切换会话权限。',
+      handled: true,
+    }
+  }
+  const session = ctx.agent.session
+  if (!arg) {
+    const current = presets.current(session.events)
+    const lines = [
+      '🔐 会话权限',
+      `当前预设: ${current}`,
+      '',
+      '可用预设:',
+      ...presets.names.map((name) => `  ${name}${name === current ? '（当前）' : ''}`),
+      '',
+      '切换: /permission <预设名>，例如 /permission danger-full-access',
+      '说明: read-only 只读；workspace-write 可写工作区；danger-full-access 完全访问（可写任意路径，如 /root/.dsh）',
+    ]
+    return { reply: lines.join('\n'), handled: true }
+  }
+  if (!presets.names.includes(arg)) {
+    return {
+      reply: `未知预设 "${arg}"。可用: ${presets.names.join(', ')}。`,
+      handled: true,
+    }
+  }
+  try {
+    presets.set(session, arg)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    return { reply: `❌ 切换预设失败: ${message}`, handled: true }
+  }
   return {
-    reply:
-      '权限说明:\n' +
-      '  私聊策略 (dmPolicy): open\n' +
-      '  群聊策略 (groupPolicy): open\n' +
-      '  群聊需 @机器人: false\n\n' +
-      '修改权限需通过配置文件 cordis.patch.yml 的 dmPolicy/groupPolicy/allowlist 字段调整。',
+    reply: `✅ 会话权限已切换: ${arg}\n（对后续的工具调用生效，含 bash/文件操作）`,
     handled: true,
   }
 }
@@ -286,7 +323,7 @@ function help(): CommandResult {
       '  /new           新建上下文（清空当前对话历史）\n' +
       '  /feishu auth   发起飞书用户授权\n' +
       '  /feishu doctor 运行飞书插件诊断\n' +
-      '  /permission    查看权限配置说明\n' +
+      '  /permission    查看/切换会话权限预设（/permission <预设名>）\n' +
       '  /help          显示本帮助',
     handled: true,
   }
