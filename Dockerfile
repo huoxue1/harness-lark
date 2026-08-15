@@ -11,7 +11,17 @@
 # Build:  docker build --target plain -t deepseek-harness:latest .
 #         docker build --target lark   -t deepseek-harness-lark:latest .
 
-# ── plain: stock dsh CLI installed from npm ───────────────────────────────
+# ── dsh-install: compile native deps (node-pty, koffi) + install dsh CLI ──
+FROM node:22-slim AS dsh-install
+RUN apt-get update && apt-get install -y --no-install-recommends git python3 make g++ \
+    && rm -rf /var/lib/apt/lists/*
+
+# The published @deepseek-ai/dsh CLI bundles the web app and every profile
+# package; override with --build-arg DSH_VERSION=<npm version>.
+ARG DSH_VERSION=0.1.0-rc.6
+RUN npm install -g @deepseek-ai/dsh@${DSH_VERSION} --no-audit --no-fund
+
+# ── plain: stock dsh CLI (no Feishu plugin) ───────────────────────────────
 FROM node:22-slim AS plain
 ENV NODE_ENV=production
 ENV DSH_TELEMETRY_DISABLED=1
@@ -20,10 +30,9 @@ ENV PNPM_HOME=/pnpm
 ENV PATH=$PNPM_HOME:$PATH
 RUN corepack enable && corepack prepare pnpm@11.7.0 --activate
 
-# The published @deepseek-ai/dsh CLI bundles the web app and every profile
-# package; override with --build-arg DSH_VERSION=<npm version>.
-ARG DSH_VERSION=0.1.0-rc.6
-RUN npm install -g @deepseek-ai/dsh@${DSH_VERSION} --no-audit --no-fund
+# Native addons were compiled in dsh-install; only the built artifacts ship.
+COPY --from=dsh-install /usr/local/bin /usr/local/bin
+COPY --from=dsh-install /usr/local/lib/node_modules /usr/local/lib/node_modules
 
 ENV DSH_HOME=/root/.dsh
 VOLUME /root/.dsh
