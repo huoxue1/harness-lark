@@ -11,8 +11,8 @@
 # Build:  docker build --target plain -t deepseek-harness:latest .
 #         docker build --target lark   -t deepseek-harness-lark:latest .
 
-# ── base: stock dsh CLI installed from npm ────────────────────────────────
-FROM node:22-slim AS base
+# ── plain: stock dsh CLI installed from npm ───────────────────────────────
+FROM node:22-slim AS plain
 ENV NODE_ENV=production
 ENV DSH_TELEMETRY_DISABLED=1
 # pnpm is needed at runtime by `dsh plugin` for out-of-tree bundle installs.
@@ -48,8 +48,8 @@ RUN pnpm run build
 # Prune to runtime dependencies only (dev toolchain is not shipped).
 RUN pnpm install --frozen-lockfile --prod && rm -rf src
 
-# ── lark: base + pre-built harness-lark plugin + first-run installer ──────
-FROM base AS lark
+# ── lark: plain + pre-built harness-lark plugin + first-run installer ─────
+FROM plain AS lark
 COPY --from=plugin-build /plugin /plugins/harness-lark
 COPY docker-entrypoint.sh /usr/local/bin/dsh-entrypoint
 RUN chmod +x /usr/local/bin/dsh-entrypoint
