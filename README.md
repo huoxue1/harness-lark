@@ -14,34 +14,66 @@ English | [中文](README.zh.md)
 | 📄 文档/Wiki/Drive | 创建/读取/更新云文档（docx）、知识库节点、云盘文件 |
 | 📊 Base/表格/日历/任务 | 多维表格（bitable）、电子表格、日历事件、任务 |
 | 🔐 用户 OAuth | 设备授权码流程（RFC 8628），用户级 token 管理 |
+| 👍 表情反馈 | 收到消息回复 `Get` 表情（处理中），完成后换成 `DONE` |
+| ⌨️ 斜杠命令 | `/status` `/model` `/cd` `/permission` `/help` 本地命令（不进模型） |
 
 ## 架构
 
 - **会话模型**：每个飞书会话（chat_id）映射一个持久的 dsh agent（`ctx.agents.resume` 优先，失败则 `create`），上下文跨消息、跨重启保留。
 - **通信层**：`@larksuiteoapi/node-sdk` 的 `WSClient` 长连接 + `EventDispatcher` 路由（参考 openclaw-lark 的 `monitor.ts` / `lark-client.ts`）。注意 SDK v1.65+ 需要显式 `start({ eventDispatcher })`（旧版构造时自动连接），且事件为 schema 2.0 格式（`message.message_type` 而非 `msg_type`）——harness-lark 两者均已适配。
-- **回复通路**：飞书消息 → `agent.followup()`；`assistant/chunk`（reasoning-delta / text-delta）→ 流式卡片；`turn/end` → 完成卡片。
+- **回复通路**：飞书消息 → `agent.followup()`；`assistant/chunk`（reasoning-delta / text-delta）→ 流式卡片；`turn/end` → 完成卡片并换表情。
+- **模型切换**：`/model` 通过 `installModelSelection` 的 `ModelSelectionRef` 运行时改写，下一轮生效。
 - **工具注册**：所有飞书能力以 dsh 工具（`ctx.tools.register` + `defineTool`）暴露给模型。
+
+## 斜杠命令
+
+| 命令 | 说明 |
+|---|---|
+| `/status` | 查看当前模型、工作目录、会话状态 |
+| `/model` | 列出可用模型；`/model <provider/model>` 切换 |
+| `/cd` | 查看工作目录；`/cd <绝对路径>` 修改（下次会话/重启后生效） |
+| `/permission` | 查看权限配置说明 |
+| `/help` | 列出所有命令 |
 
 ## 安装
 
 ### 前置条件
 
 - Node.js ≥ 22
-- 已安装 DeepSeek Harness（`dsh` CLI）
+- 已安装 DeepSeek Harness（`dsh` CLI，可通过 `npx @deepseek-ai/dsh web` 或从源码运行）
 - 飞书开放平台应用（凭据：`appId`、`appSecret`；推荐开启长连接模式，无需公网回调地址）
+- 飞书开放平台后台：事件订阅 → 订阅方式选择「使用长连接接收事件」，并订阅 `im.message.receive_v1` 事件
 
-### 作为 bundle 安装
+### 环境变量
+
+插件通过环境变量读取凭据，运行前先设置：
 
 ```sh
-# 在项目根目录构建
+export FEISHU_APP_ID=cli_xxx
+export FEISHU_APP_SECRET=your_secret
+```
+
+### 方式一：作为 bundle 安装（推荐）
+
+```sh
+# 1. 构建插件（产出 lib/）
 pnpm install
 pnpm run build
 
-# 安装到 dsh profile
+# 2. 安装到 dsh profile（自动写入 profile 的 bundles + dependencies）
 dsh plugin --profile web add ./path/to/harness-lark
 ```
 
-或在 profile 的 `cordis.patch.yml` 中手动加入：
+### 方式二：npm 发布后安装
+
+```sh
+# 发布后（npm publish），直接：
+dsh plugin --profile web add harness-lark
+```
+
+### 方式三：手动 patch 安装
+
+在 profile 的 `cordis.patch.yml`（`$DSH_HOME/profiles/<name>/cordis.patch.yml`）中加入：
 
 ```yaml
 - insert:
@@ -55,7 +87,14 @@ dsh plugin --profile web add ./path/to/harness-lark
         dmPolicy: open       # open | pairing | allowlist | disabled
         groupPolicy: disabled
         requireMentionInGroups: true
+        replyMode: streaming # auto | static | streaming
 ```
+
+> 群聊允许 + 流式回复：`groupPolicy: open`、`requireMentionInGroups: false`、`replyMode: streaming`。
+
+### 方式四：Docker 部署
+
+参见仓库内 `Dockerfile` / `docker-compose.yml`（dsh 侧镜像），插件通过 `COPY plugins/harness-lark` 打进镜像，entrypoint 首次启动时用 `dsh plugin --profile web add` 装入 profile。
 
 ## 配置
 

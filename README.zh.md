@@ -27,21 +27,40 @@ Lark/飞书渠道插件，为 [DeepSeek Harness](https://github.com/deepseek-ai/
 ### 前置条件
 
 - Node.js ≥ 22
-- 已安装 DeepSeek Harness（`dsh` CLI）
+- 已安装 DeepSeek Harness（`dsh` CLI，可通过 `npx @deepseek-ai/dsh web` 或从源码运行）
 - 飞书开放平台应用（凭据：`appId`、`appSecret`；推荐开启长连接模式，无需公网回调地址）
+- 飞书开放平台后台：事件订阅 → 订阅方式选择「使用长连接接收事件」，并订阅 `im.message.receive_v1` 事件
 
-### 作为 bundle 安装
+### 环境变量
+
+插件通过环境变量读取凭据，运行前先设置：
 
 ```sh
-# 在项目根目录构建
+export FEISHU_APP_ID=cli_xxx
+export FEISHU_APP_SECRET=your_secret
+```
+
+### 方式一：作为 bundle 安装（推荐）
+
+```sh
+# 1. 构建插件（产出 lib/）
 pnpm install
 pnpm run build
 
-# 安装到 dsh profile
+# 2. 安装到 dsh profile（自动写入 profile 的 bundles + dependencies）
 dsh plugin --profile web add ./path/to/harness-lark
 ```
 
-或在 profile 的 `cordis.patch.yml` 中手动加入：
+### 方式二：npm 发布后安装
+
+```sh
+# 发布后（npm publish），直接：
+dsh plugin --profile web add harness-lark
+```
+
+### 方式三：手动 patch 安装
+
+在 profile 的 `cordis.patch.yml`（`$DSH_HOME/profiles/<name>/cordis.patch.yml`）中加入：
 
 ```yaml
 - insert:
@@ -55,7 +74,14 @@ dsh plugin --profile web add ./path/to/harness-lark
         dmPolicy: open       # open | pairing | allowlist | disabled
         groupPolicy: disabled
         requireMentionInGroups: true
+        replyMode: streaming # auto | static | streaming
 ```
+
+> 群聊允许 + 流式回复：`groupPolicy: open`、`requireMentionInGroups: false`、`replyMode: streaming`。
+
+### 方式四：Docker 部署
+
+参见仓库内 `Dockerfile` / `docker-compose.yml`（dsh 侧镜像），插件通过 `COPY plugins/harness-lark` 打进镜像，entrypoint 首次启动时用 `dsh plugin --profile web add` 装入 profile。
 
 ## 配置
 

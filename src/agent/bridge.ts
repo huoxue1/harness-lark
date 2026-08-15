@@ -14,14 +14,32 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
+import {
+  installModelSelection,
+  type ModelSelection,
+  type ModelSelectionRef,
+} from '@deepseek-ai/dsh-agent'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { SessionId, type SessionEvent } from '@deepseek-ai/dsh-session'
+import type {} from '@deepseek-ai/dsh-agent-default-model'
 import type { HarnessLarkConfig } from '../core/config-schema.ts'
 import type { MessageContext } from '../core/types.ts'
 import { sendText, type SendMessageParams } from '../messaging/outbound/deliver.ts'
+import { addReaction, removeReaction, removeReactionByEmoji } from '../messaging/outbound/reactions.ts'
 import type { LarkClient } from '../core/lark-client.ts'
 import { StreamingCard } from '../card/streaming-card.ts'
 import type { FooterSessionMetrics } from '../card/builder.ts'
+import { runCommand } from './commands.ts'
+
+/** Reaction emoji: in-progress and done. */
+const PROCESSING_EMOJI = 'Get'
+const DONE_EMOJI = 'DONE'
+
+/** Bridge diagnostics go to stdout so they surface in container logs. */
+function blog(level: 'info' | 'warn' | 'error', msg: string): void {
+  const fn = level === 'error' ? console.error : level === 'warn' ? console.warn : console.log
+  fn(`[harness-lark] ${msg}`)
+}
 
 /** Stable dsh session id derived from the Feishu conversation identity. */
 export function sessionIdForChat(accountId: string, chatId: string): SessionId {
@@ -46,6 +64,14 @@ interface ChatRecord {
     cacheRead: number
     cacheWrite: number
   }
+  /** Mutable model selection (switched by /model). */
+  selectionRef: ModelSelectionRef
+  /** Working directory for this chat (switched by /cd). */
+  cwd: string
+  /** The message id currently being processed (for reaction swap). */
+  processingMessageId?: string
+  /** Reaction id of the in-progress "Get" emoji. */
+  processingReactionId?: string
 }
 
 export interface AgentBridgeOptions {
@@ -76,7 +102,7 @@ export class AgentBridge {
     this.opts = opts
   }
 
-  /** Handle one inbound Feishu message: route to the chat's agent. */
+  /** Handle one inbound Feishu message: commands first, else route to the agent. */
   async handleMessage(message: MessageContext): Promise<void> {
     if (this.closed) return
     const key = `${this.opts.accountId}:${message.chatId}`
@@ -84,10 +110,36 @@ export class AgentBridge {
 
     let record = this.records.get(key)
     if (!record) {
-      record = await this.ensureAgent(sessionId, key, message)
+      blog('info', `creating agent for ${key}...`)
+      record = await this.ensureAgent(sessionId, key, message, process.cwd())
+      blog('info', `agent ready for ${key}`)
     }
 
-    // Streaming mode: open a thinking card before the turn runs.
+    // ── Slash commands: handled locally, no model turn, no card ──────────
+    const text = this.renderUserText(message)
+    const cwdHolder = { value: record.cwd }
+    const commandResult = await runCommand(message.text, {
+      agent: record.agent,
+      selection: record.selectionRef,
+      cwd: cwdHolder,
+      availableModels: await this.availableModels(),
+    })
+    if (commandResult.handled) {
+      await this.replyText(record, commandResult.reply)
+      // /cd changed the working directory: rebuild the agent so the next
+      // turn (and shell/fs tools) run in the new directory.
+      if (cwdHolder.value !== record.cwd) {
+        record.cwd = cwdHolder.value
+        blog('info', `cwd changed -> ${record.cwd}, rebuilding agent for ${key}`)
+        await record.dispose()
+        this.records.delete(key)
+        record = await this.ensureAgent(sessionId, key, message, record.cwd)
+        this.records.set(key, record)
+      }
+      return
+    }
+
+    // ── Streaming mode: open a thinking card before the turn runs ────────
     if (this.replyMode() === 'streaming' && record.streamingCard === undefined) {
       const card = new StreamingCard({
         client: this.opts.client(),
@@ -103,12 +155,61 @@ export class AgentBridge {
       void card.start()
     }
 
-    const text = this.renderUserText(message)
+    // ── Reaction feedback: mark the user's message "Get" while processing ──
+    void this.markProcessing(record, message)
+
     const userMessage = createUserMessage({
       content: [{ type: 'text', text }],
       source: { kind: 'user' },
     })
+    blog('info', `followup to ${key}: ${text.slice(0, 60)}`)
     record.agent.followup(userMessage)
+  }
+
+  /** Send a plain-text reply into the chat (for commands). */
+  private async replyText(record: ChatRecord, text: string): Promise<void> {
+    const result = await sendText({
+      client: this.opts.client().client,
+      receiveId: record.chatId,
+      receiveIdType: 'chat_id',
+      text,
+    })
+    if (!result.ok) {
+      blog('warn', `command reply failed to ${record.chatId}: ${result.error}`)
+    }
+  }
+
+  /** Add the in-progress "Get" reaction to the user's message. */
+  private async markProcessing(record: ChatRecord, message: MessageContext): Promise<void> {
+    try {
+      const { reactionId } = await addReaction(this.opts.client().client, message.messageId, PROCESSING_EMOJI)
+      record.processingMessageId = message.messageId
+      record.processingReactionId = reactionId
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error)
+      blog('warn', `addReaction failed on ${message.messageId}: ${msg}`)
+    }
+  }
+
+  /** Swap the "Get" reaction to "DONE" once the turn completes. */
+  private async markDone(record: ChatRecord): Promise<void> {
+    if (!record.processingMessageId) return
+    const client = this.opts.client().client
+    const messageId = record.processingMessageId
+    try {
+      if (record.processingReactionId) {
+        await removeReaction(client, messageId, record.processingReactionId)
+      } else {
+        await removeReactionByEmoji(client, messageId, PROCESSING_EMOJI)
+      }
+      await addReaction(client, messageId, DONE_EMOJI)
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error)
+      blog('warn', `markDone failed on ${messageId}: ${msg}`)
+    } finally {
+      record.processingMessageId = undefined
+      record.processingReactionId = undefined
+    }
   }
 
   /** Create or resume the persistent agent for a chat. */
@@ -116,32 +217,55 @@ export class AgentBridge {
     sessionId: SessionId,
     key: string,
     firstMessage: MessageContext,
+    cwd: string,
   ): Promise<ChatRecord> {
     const agents = this.ctx.agents
+
+    // Resolve the model selection: explicit config wins, else the composed
+    // default model (agentDefaultModel). Mirror dsh-headless: the selection
+    // must be installed on the agent's scoped context via setup, otherwise
+    // the loop has no provider/model route and followup() produces nothing.
+    const selection = this.modelSelection()
+    const agentOptions = selection === undefined ? undefined : { provider: selection.provider, model: selection.model }
+    // Mutable ref shared with the command layer: /model rewrites `current`,
+    // which the loop snapshots on the next step.
+    const selectionRef: ModelSelectionRef = { current: selection, assembled: undefined }
+    const setup = selection === undefined ? undefined : (agentCtx: Context) => {
+      installModelSelection(agentCtx, selectionRef)
+    }
 
     // Try resume first: a persisted session keeps context across restarts.
     let handle: { agent: Agent; dispose: () => Promise<void> } | undefined
     try {
       handle = await agents.resume({
         resumeSessionId: sessionId,
-        agentOptions: this.agentOptions(),
+        agentOptions,
+        setup,
       })
     } catch (error) {
       // Session not persisted or resume failed — create fresh.
       const message = error instanceof Error ? error.message : String(error)
-      this.ctx.logger.warn(`[harness-lark] resume failed for ${key}, creating: ${message}`)
+      blog('warn', `resume failed for ${key}, creating: ${message}`)
       handle = undefined
     }
 
     if (!handle) {
-      handle = await agents.create({
-        sessionId,
-        meta: {
-          cwd: process.cwd(),
-          origin: 'subagent',
-        },
-        agentOptions: this.agentOptions(),
-      })
+      try {
+        handle = await agents.create({
+          sessionId,
+          meta: {
+            cwd,
+            origin: 'subagent',
+          },
+          agentOptions,
+          setup,
+        })
+        blog('info', `agent created for ${key} (model=${selection?.provider ?? 'default'}/${selection?.model ?? 'default'})`)
+      } catch (createError) {
+        const message = createError instanceof Error ? createError.message : String(createError)
+        blog('error', `agent create failed for ${key}: ${message}`)
+        throw createError
+      }
     }
 
     const record: ChatRecord = {
@@ -150,6 +274,8 @@ export class AgentBridge {
       chatId: firstMessage.chatId,
       chatType: firstMessage.chatType,
       metrics: { inputTokens: 0, outputTokens: 0, cacheRead: 0, cacheWrite: 0 },
+      selectionRef,
+      cwd,
     }
     this.records.set(key, record)
     this.sessions.set(sessionId, key)
@@ -212,7 +338,7 @@ export class AgentBridge {
         record.replyAnchor = result.messageId
       }
       if (!result.ok) {
-        this.ctx.logger.warn(`[harness-lark] send failed to ${record.chatId}: ${result.error}`)
+        blog('warn', `send failed to ${record.chatId}: ${result.error}`)
       }
       return
     }
@@ -231,6 +357,8 @@ export class AgentBridge {
       record.replyAnchor = undefined
       record.metrics = { inputTokens: 0, outputTokens: 0, cacheRead: 0, cacheWrite: 0 }
       void this.sessions.get(sessionId)
+      // Swap the in-progress reaction to done.
+      void this.markDone(record)
     }
   }
 
@@ -247,11 +375,39 @@ export class AgentBridge {
     return mode
   }
 
-  private agentOptions(): Record<string, unknown> | undefined {
-    const opts: Record<string, unknown> = {}
-    if (this.opts.config.provider) opts.provider = this.opts.config.provider
-    if (this.opts.config.model) opts.model = this.opts.config.model
-    return Object.keys(opts).length > 0 ? opts : undefined
+  /** Resolve the model selection: explicit config wins, else the default. */
+  private modelSelection(): ModelSelection | undefined {
+    if (this.opts.config.provider && this.opts.config.model) {
+      return { provider: this.opts.config.provider, model: this.opts.config.model }
+    }
+    const defaultModel = this.ctx.get('agentDefaultModel') as
+      | { currentSelection(): ModelSelection }
+      | undefined
+    if (defaultModel) {
+      return defaultModel.currentSelection()
+    }
+    return undefined
+  }
+
+  /** List provider/model pairs registered in the llm runtime. */
+  private async availableModels(): Promise<Array<{ provider: string; model: string }>> {
+    const llm = this.ctx.get('llm') as
+      | { listProviders(): Array<{ id: string }>; listModels(provider: string): Promise<Array<{ id: string }>> }
+      | undefined
+    if (!llm) return []
+    const result: Array<{ provider: string; model: string }> = []
+    for (const provider of llm.listProviders()) {
+      try {
+        const models = await llm.listModels(provider.id)
+        for (const m of models) {
+          result.push({ provider: provider.id, model: m.id })
+        }
+      } catch {
+        // Provider model listing failed — skip, still list the route itself.
+        result.push({ provider: provider.id, model: '*' })
+      }
+    }
+    return result
   }
 
   /** Dispose all agents owned by this bridge. */

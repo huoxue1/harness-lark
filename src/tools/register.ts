@@ -26,6 +26,15 @@ export function registerLarkTool(ctx: Context, def: LarkToolDef): void {
     name: def.name,
     description: def.description,
     parameters: def.parameters as never,
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: true,
+        properties: {},
+      },
+      // Default render: JSON-stringify the tool result for the model.
+      render: (_args, value) => [{ type: 'text', text: formatToolValue(value) }],
+    },
     timeoutMs: def.timeoutMs,
     isConcurrencySafe: () => true,
     async execute(args, _exec) {
@@ -33,4 +42,15 @@ export function registerLarkTool(ctx: Context, def: LarkToolDef): void {
       return def.execute(args, client)
     },
   }))
+}
+
+/** Render a tool result value as model-visible text. */
+function formatToolValue(value: unknown): string {
+  if (typeof value === 'string') return value
+  if (value === undefined || value === null) return 'ok'
+  try {
+    return JSON.stringify(value, null, 2)
+  } catch {
+    return String(value)
+  }
 }

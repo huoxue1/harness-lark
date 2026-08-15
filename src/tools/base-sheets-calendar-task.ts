@@ -65,7 +65,7 @@ export function registerBaseSheetsCalendarTaskTools(
         enum: ['create', 'list', 'get', 'update', 'delete'],
         description: 'Operation to perform.',
       },
-      fields: { type: 'object', description: 'Record fields (for create/update).' },
+      fields: { type: 'object', additionalProperties: true, description: 'Record fields (for create/update).' },
       record_id: { type: 'string', description: 'Record id (for get/update/delete).' },
       page_size: { type: 'integer', description: 'Max results for list (default 20).' },
       filter: { type: 'string', description: 'Filter formula for list (e.g. CurrentValue.[field]="x").' },
@@ -171,7 +171,7 @@ export function registerBaseSheetsCalendarTaskTools(
       spreadsheet_token: { type: 'string', description: 'Spreadsheet token (for read/write).' },
       title: { type: 'string', description: 'Spreadsheet title (for create).' },
       range: { type: 'string', description: 'Cell range, e.g. A1:C10 (for read/write).' },
-      values: { type: 'array', description: '2D array of values (for write).' },
+      values: { type: 'array', items: { type: 'array', items: { type: 'string' } }, description: '2D array of values (for write).' },
     },
     resolveClient,
     async execute(args, client) {

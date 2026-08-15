@@ -1,0 +1,16 @@
+# Normalize line endings: keep LF for everything text, especially shell
+# scripts and GitHub Actions workflows (Linux CI is CRLF-sensitive).
+* text=auto
+
+*.ts text eol=lf
+*.mts text eol=lf
+*.mjs text eol=lf
+*.json text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.md text eol=lf
+*.sh text eol=lf
+
+*.png binary
+*.jpg binary
+*.gif binary

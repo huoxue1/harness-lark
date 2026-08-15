@@ -37,6 +37,8 @@ export {
   sendFile,
   sendAudio,
 } from './messaging/outbound/media.ts'
+export { addReaction, removeReaction, removeReactionByEmoji } from './messaging/outbound/reactions.ts'
+export { runCommand } from './agent/commands.ts'
 export { StreamingCard } from './card/streaming-card.ts'
 export {
   buildThinkingCard,
