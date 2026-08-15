@@ -312,7 +312,9 @@ export class AgentBridge {
           sessionId,
           meta: {
             cwd,
-            origin: 'subagent',
+            // NOTE: no `origin: 'subagent'` — the Web GUI treats subagent-
+            // origin sessions as nested fork children and hides orphans from
+            // the session list. Feishu channel conversations are top-level.
           },
           agentOptions,
           setup,
