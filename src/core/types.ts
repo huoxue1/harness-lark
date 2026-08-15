@@ -88,6 +88,10 @@ export interface MessageContext {
   mentions: MentionInfo[]
   /** Extracted plain text of the message (mentions resolved to names). */
   text: string
+  /** file_key for a file/audio/media message (downloadable via im.messageResource). */
+  fileKey?: string
+  /** image_key for an image message (downloadable via im.messageResource type=image). */
+  imageKey?: string
   /** Original raw content string. */
   rawContent?: string
   createTime?: number

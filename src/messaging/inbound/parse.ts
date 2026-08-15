@@ -53,6 +53,8 @@ export function parseMessageEvent(
 
   const text = extractPlainText(event)
   const createTime = message.create_time ? Number(message.create_time) : undefined
+  const fileKey = extractFileKey(event)
+  const imageKey = extractImageKey(event)
 
   return {
     messageId: msgId,
@@ -67,8 +69,38 @@ export function parseMessageEvent(
     mentionedBot,
     mentionAll,
     text,
+    fileKey,
+    imageKey,
     rawContent: message.content,
     createTime,
+  }
+}
+
+/** Extract file_key from a file/audio/media message content payload. */
+function extractFileKey(event: FeishuMessageEvent): string | undefined {
+  const msgType = event.message.msg_type ?? event.message.message_type ?? ''
+  if (msgType !== 'file' && msgType !== 'audio' && msgType !== 'media') return undefined
+  const content = event.message.content
+  if (!content) return undefined
+  try {
+    const parsed = JSON.parse(content) as { file_key?: string }
+    return parsed.file_key
+  } catch {
+    return undefined
+  }
+}
+
+/** Extract image_key from an image message content payload. */
+function extractImageKey(event: FeishuMessageEvent): string | undefined {
+  const msgType = event.message.msg_type ?? event.message.message_type ?? ''
+  if (msgType !== 'image') return undefined
+  const content = event.message.content
+  if (!content) return undefined
+  try {
+    const parsed = JSON.parse(content) as { image_key?: string }
+    return parsed.image_key
+  } catch {
+    return undefined
   }
 }
 
@@ -101,7 +133,7 @@ function extractPlainText(event: FeishuMessageEvent): string {
       case 'media':
         return '[视频]'
       case 'interactive':
-        return '[卡片]'
+        return extractCardText(parsed)
       case 'system':
         return '[系统消息]'
       default:
@@ -133,6 +165,48 @@ function extractPostText(parsed: Record<string, unknown>): string {
     }
   }
   return parts.join('')
+}
+
+/**
+ * Extract human-readable text from an interactive card (msg_type=interactive).
+ * Cards may use the schema 2.0 (`json_card`), a legacy `card` object, or a
+ * plain header+elements form. Returns the card title plus element text.
+ */
+function extractCardText(parsed: Record<string, unknown>): string {
+  // schema 2.0 card: { json_card: "{...}" }
+  if (typeof parsed.json_card === 'string') {
+    try {
+      return extractCardText(JSON.parse(parsed.json_card) as Record<string, unknown>)
+    } catch {
+      // fall through to the outer default
+    }
+  }
+
+  const parts: string[] = []
+
+  // Header title.
+  const header = parsed.header as Record<string, unknown> | undefined
+  const title = header?.title as Record<string, unknown> | undefined
+  if (typeof title?.content === 'string') parts.push(title.content)
+  else if (typeof title?.text === 'string') parts.push(title.text)
+
+  // Element text (markdown / div / text / plain_text).
+  const elements = parsed.elements ?? (parsed.body as Record<string, unknown> | undefined)?.elements
+  if (Array.isArray(elements)) {
+    for (const el of elements as unknown[]) {
+      if (typeof el !== 'object' || el === null) continue
+      const e = el as Record<string, unknown>
+      if (typeof e.content === 'string') parts.push(e.content)
+      else if (typeof e.text === 'string') parts.push(e.text)
+      else {
+        const nested = (e.text ?? e.elements) as unknown
+        if (typeof nested === 'string') parts.push(nested)
+      }
+    }
+  }
+
+  const joined = parts.filter((p) => p.trim() !== '').join('\n')
+  return joined || '[卡片]'
 }
 
 /**

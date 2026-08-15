@@ -412,7 +412,15 @@ export class AgentBridge {
   private renderUserText(message: MessageContext): string {
     const sender = message.senderOpenId ? ` (from ${message.senderOpenId})` : ''
     const prefix = message.chatType === 'group' ? `[群聊${sender}] ` : ''
-    return `${prefix}${message.text}`
+    // Attach attachment keys so the model can download via the download tool.
+    let attachmentHint = ''
+    if (message.fileKey) {
+      attachmentHint += `\n[附件] file_key=${message.fileKey} message_id=${message.messageId}（可用 feishu_download_file 获取内容）`
+    }
+    if (message.imageKey) {
+      attachmentHint += `\n[图片] image_key=${message.imageKey} message_id=${message.messageId}（可用 feishu_download_file 获取内容）`
+    }
+    return `${prefix}${message.text}${attachmentHint}`
   }
 
   /** Session id for a message, thread-scoped when the toggle is on and a thread is present. */
