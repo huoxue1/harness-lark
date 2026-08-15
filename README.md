@@ -32,6 +32,7 @@ English | [中文](README.zh.md)
 | `/status` | 查看当前模型、工作目录、会话状态 |
 | `/model` | 列出可用模型；`/model <provider/model>` 切换 |
 | `/cd` | 查看工作目录；`/cd <绝对路径>` 修改（下次会话/重启后生效） |
+| `/new` | 新建上下文（清空当前对话历史，别名 `/reset`） |
 | `/permission` | 查看权限配置说明 |
 | `/help` | 列出所有命令 |
 
@@ -113,6 +114,7 @@ dsh plugin --profile web add harness-lark
 | `groupPolicy` | `open` \| `allowlist` \| `disabled` | `disabled` | 群聊策略 |
 | `allowlist` | string[] | — | open_id 白名单 |
 | `requireMentionInGroups` | boolean | `true` | 群聊中是否需要 @机器人 |
+| `topicSeparateSession` | boolean | `false` | 话题群消息按 thread 独立建 session（每个话题一个上下文） |
 | `dedupTtlMs` | number | 12h | 消息去重窗口 |
 
 ## 工具清单

@@ -14,13 +14,27 @@ Lark/飞书渠道插件，为 [DeepSeek Harness](https://github.com/deepseek-ai/
 | 📄 文档/Wiki/Drive | 创建/读取/更新云文档（docx）、知识库节点、云盘文件 |
 | 📊 Base/表格/日历/任务 | 多维表格（bitable）、电子表格、日历事件、任务 |
 | 🔐 用户 OAuth | 设备授权码流程（RFC 8628），用户级 token 管理 |
+| 👍 表情反馈 | 收到消息回复 `Get` 表情（处理中），完成后换成 `DONE` |
+| ⌨️ 斜杠命令 | `/status` `/model` `/cd` `/new` `/permission` `/help` 本地命令（不进模型） |
 
 ## 架构
 
 - **会话模型**：每个飞书会话（chat_id）映射一个持久的 dsh agent（`ctx.agents.resume` 优先，失败则 `create`），上下文跨消息、跨重启保留。
 - **通信层**：`@larksuiteoapi/node-sdk` 的 `WSClient` 长连接 + `EventDispatcher` 路由（参考 openclaw-lark 的 `monitor.ts` / `lark-client.ts`）。
-- **回复通路**：飞书消息 → `agent.followup()`；`assistant/chunk`（reasoning-delta / text-delta）→ 流式卡片；`turn/end` → 完成卡片。
+- **回复通路**：飞书消息 → `agent.followup()`；`assistant/chunk`（reasoning-delta / text-delta）→ 流式卡片；`turn/end` → 完成卡片并换表情。
+- **话题群**：`topicSeparateSession` 开启时话题消息按 thread 独立建 session，回复挂对应话题线程下。
 - **工具注册**：所有飞书能力以 dsh 工具（`ctx.tools.register` + `defineTool`）暴露给模型。
+
+## 斜杠命令
+
+| 命令 | 说明 |
+|---|---|
+| `/status` | 查看当前模型、工作目录、会话状态 |
+| `/model` | 列出可用模型；`/model <provider/model>` 切换 |
+| `/cd` | 查看工作目录；`/cd <绝对路径>` 修改（下次会话/重启后生效） |
+| `/new` | 新建上下文（清空当前对话历史，别名 `/reset`） |
+| `/permission` | 查看权限配置说明 |
+| `/help` | 列出所有命令 |
 
 ## 安装
 
@@ -100,6 +114,7 @@ dsh plugin --profile web add harness-lark
 | `groupPolicy` | `open` \| `allowlist` \| `disabled` | `disabled` | 群聊策略 |
 | `allowlist` | string[] | — | open_id 白名单 |
 | `requireMentionInGroups` | boolean | `true` | 群聊中是否需要 @机器人 |
+| `topicSeparateSession` | boolean | `false` | 话题群消息按 thread 独立建 session（每个话题一个上下文） |
 | `dedupTtlMs` | number | 12h | 消息去重窗口 |
 
 ## 工具清单
