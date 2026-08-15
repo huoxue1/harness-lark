@@ -63,4 +63,11 @@ PATCH
 fi
 
 echo '[entrypoint] starting dsh web...'
-exec dsh --profile web
+# dsh's /api trust fence rejects browsers whose Host is not explicitly trusted
+# (it refuses binding 0.0.0.0, so LAN addresses are never auto-trusted). Pass
+# every authority from DSH_TRUSTED_HOSTS (space-separated host or host:port).
+TRUSTED_ARGS=()
+for authority in ${DSH_TRUSTED_HOSTS:-}; do
+  TRUSTED_ARGS+=(--trusted-host "$authority")
+done
+exec dsh --profile web "${TRUSTED_ARGS[@]}"
