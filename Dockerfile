@@ -41,7 +41,13 @@ EXPOSE 3080
 HEALTHCHECK --interval=20s --timeout=5s --start-period=25s --retries=5 \
   CMD node -e "fetch('http://127.0.0.1:3080').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
-ENTRYPOINT ["dsh", "--profile", "web"]
+# dsh web binds the container loopback; the entrypoint starts a TCP forwarder
+# on the container IP so Docker's published port can reach the UI.
+COPY docker-port-forward.js /usr/local/bin/dsh-port-forward.js
+COPY docker-entrypoint.sh /usr/local/bin/dsh-entrypoint
+RUN chmod +x /usr/local/bin/dsh-entrypoint
+
+ENTRYPOINT ["dsh-entrypoint"]
 
 # ── plugin-build: compile harness-lark + prod deps ────────────────────────
 FROM node:22-slim AS plugin-build

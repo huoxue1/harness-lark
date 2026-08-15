@@ -13,6 +13,14 @@ PROFILE_DIR="$DSH_HOME/profiles/web"
 PROFILE_PATCH="$PROFILE_DIR/cordis.patch.yml"
 PLUGIN_SRC=/plugins/harness-lark
 
+# dsh web binds the container loopback by design (safety). Docker's published
+# port reaches the container's bridge IP, not its loopback, so expose the UI
+# through a tiny TCP forwarder on the container's own IP. Disable with
+# DSH_WEB_FORWARD=0.
+if [ "${DSH_WEB_FORWARD:-1}" != "0" ] && [ -f /usr/local/bin/dsh-port-forward.js ]; then
+  node /usr/local/bin/dsh-port-forward.js 3080 &
+fi
+
 install_plugin() {
   dsh plugin --profile web add "file:$PLUGIN_SRC" > /tmp/plugin-install.log 2>&1
 }
