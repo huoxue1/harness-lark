@@ -1,0 +1,4 @@
+title: harness-lark — DeepSeek Harness 飞书频道
+description: 用 Docker 安装 deepseek-harness，并安装 harness-lark 飞书/Lark 频道插件
+theme: jekyll-theme-cayman
+permalink: pretty
