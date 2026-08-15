@@ -9,6 +9,7 @@
 | `/cd <路径>` | 切换 agent 工作目录（重建会话） |
 | `/new` / `/reset` | 清空当前会话上下文，开启新会话 |
 | `/permission` | 查看/切换会话权限预设（`/permission <预设名>`，如 `danger-full-access`） |
+| `/setting permission` | 查看/设置新会话默认权限预设（`/setting permission <预设名>`） |
 | `/help` | 命令帮助 |
 | `/feishu auth` | 用户 OAuth 设备授权（一次性） |
 | `/feishu doctor` | 插件诊断报告（凭据、机器人、连接、授权状态） |
