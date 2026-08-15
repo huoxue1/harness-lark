@@ -1,0 +1,14 @@
+# Keep the Docker build context small and free of secrets.
+.git
+node_modules
+lib
+dist
+coverage
+.env
+.env.local
+*.tgz
+.github
+docs
+tests
+tmp-app-scopes.cjs
+tmp-scope-intersect.cjs

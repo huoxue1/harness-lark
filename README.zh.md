@@ -2,7 +2,9 @@
 
 Lark/飞书渠道插件，为 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 提供飞书通信能力。通信部分参考 [openclaw-lark](https://github.com/larksuite/openclaw-lark)（MIT, ByteDance Ltd.），适配 dsh 的 Cordis 插件体系。
 
-[English](README.md) | 中文
+[English](README.md) | 中文 | [📖 安装文档（GitHub Pages）](https://huoxue1.github.io/harness-lark/)
+
+> 用 Docker 一键部署（自带插件的 `deepseek-harness-lark` 镜像）或手动安装插件，见[安装文档](https://huoxue1.github.io/harness-lark/)。
 
 ## 功能
 

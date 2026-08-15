@@ -15,6 +15,7 @@ import type {} from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-llm'
 import type {} from '@deepseek-ai/dsh-tools'
+import { settingsNamespace } from '@deepseek-ai/dsh-settings'
 import Schema from '@deepseek-ai/schemastery'
 import { AgentBridge } from './agent/bridge.ts'
 import { monitorFeishuProvider } from './channel/monitor.ts'
@@ -151,7 +152,7 @@ const UatSectionSchema = Schema.object({
  */
 function installTokenPersistence(ctx: Context): void {
   ctx.inject(['settings'], (sctx) => {
-    const scope = sctx.settings.register('harness-lark', UatSectionSchema)
+    const scope = sctx.settings.register(settingsNamespace('harness-lark'), UatSectionSchema)
     const section = scope.get() as { tokens?: Record<string, unknown> }
     hydrateTokens(
       Object.entries(section.tokens ?? {}).map(([openId, token]) => ({

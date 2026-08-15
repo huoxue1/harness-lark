@@ -1,0 +1,45 @@
+# harness-lark — DeepSeek Harness + 飞书频道一键部署示例
+#
+# 用法：
+#   1. 准备飞书应用凭据并导出：
+#      export FEISHU_APP_ID=cli_xxx
+#      export FEISHU_APP_SECRET=secret
+#   2. docker compose up -d
+#   3. 打开 http://<主机>:3080 配置 LLM 模型
+#
+# 数据（会话/设置/授权 token）持久化在命名卷 dsh-data 中，
+# 容器重建/升级不丢失；用户 token 存于 settings.yaml，重启无需重新授权。
+
+services:
+  dsh-lark:
+    image: ghcr.io/huoxue1/deepseek-harness-lark:latest
+    container_name: dsh-web
+    restart: unless-stopped
+    ports:
+      # dsh 出于安全拒绝监听 0.0.0.0，容器内部绑定回环地址，
+      # 由 Docker 把 3080 发布到主机。改左侧端口可换主机端口。
+      - "3080:3080"
+    volumes:
+      - dsh-data:/root/.dsh
+    environment:
+      - NODE_ENV=production
+      - DSH_TELEMETRY_DISABLED=1
+      # 飞书应用凭据（开放平台 https://open.feishu.cn 创建应用获取）
+      - FEISHU_APP_ID=${FEISHU_APP_ID}
+      - FEISHU_APP_SECRET=${FEISHU_APP_SECRET}
+      # 也可把模型 API Key 通过环境变量传入（或首次启动后在 Web UI 配置）
+      # - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3080').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 25s
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+volumes:
+  dsh-data:
