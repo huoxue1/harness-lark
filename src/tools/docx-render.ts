@@ -95,18 +95,19 @@ function renderBlock(block: DocxBlock): string | null {
         | { elements?: DocxTextElement[] }
         | undefined
       const level = Math.min(bt - 2, 6)
-      return `${'#'.repeat(level)} ${renderElements(heading?.elements)}` || null
+      const text = renderElements(heading?.elements)
+      return text === '' ? null : `${'#'.repeat(level)} ${text}`
     }
     case 12: // bullet
-      return `- ${renderElements(block.bullet?.elements)}` || null
+      return nonEmpty(renderElements(block.bullet?.elements), (t) => `- ${t}`)
     case 13: // ordered
-      return `1. ${renderElements(block.ordered?.elements)}` || null
+      return nonEmpty(renderElements(block.ordered?.elements), (t) => `1. ${t}`)
     case 14: // code
-      return `\`\`\`\n${renderElements(block.code?.elements)}\n\`\`\`` || null
+      return nonEmpty(renderElements(block.code?.elements), (t) => `\`\`\`\n${t}\n\`\`\``)
     case 15: // quote
-      return `> ${renderElements(block.quote?.elements)}` || null
+      return nonEmpty(renderElements(block.quote?.elements), (t) => `> ${t}`)
     case 17: // todo
-      return `- [${block.todo?.style?.done ? 'x' : ' '}] ${renderElements(block.todo?.elements)}` || null
+      return nonEmpty(renderElements(block.todo?.elements), (t) => `- [${block.todo?.style?.done ? 'x' : ' '}] ${t}`)
     case 31: {
       // table
       const table = block.table
@@ -130,7 +131,7 @@ function renderBlock(block: DocxBlock): string | null {
     case 27: // image
       return block.image?.image?.token ? `![image](img_${block.image.image.token})` : null
     case 21: // callout
-      return `> 💡 ${renderElements(block.callout?.elements)}` || null
+      return nonEmpty(renderElements(block.callout?.elements), (t) => `> 💡 ${t}`)
     case 22: // divider
       return '---'
     case 26: // file
@@ -138,6 +139,11 @@ function renderBlock(block: DocxBlock): string | null {
     default:
       return renderUnknown(block)
   }
+}
+
+/** Return null when text is empty, else the wrapped rendering. */
+function nonEmpty(text: string, wrap: (t: string) => string): string | null {
+  return text === '' ? null : wrap(text)
 }
 
 function renderUnknown(block: DocxBlock): string | null {

@@ -191,9 +191,6 @@ export function registerBaseSheetsCalendarTaskTools(
           if (!args.spreadsheet_token || !args.range) {
             throw new Error('sheet: read requires spreadsheet_token and range')
           }
-          const response = await client.api.sheets.spreadsheetSheet.query({
-            path: { spreadsheet_token: String(args.spreadsheet_token) },
-          } as never)
           // Read the raw range via values API.
           const values = await readSheetRange(client, String(args.spreadsheet_token), String(args.range))
           return { values }

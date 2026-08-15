@@ -173,7 +173,6 @@ export class LarkClient {
    * and version-drifted, so this accessor is `any` and callers assert the
    * response shapes they rely on at the read site.
    */
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   get api(): any {
     return this.sdk
   }

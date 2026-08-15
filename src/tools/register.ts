@@ -6,7 +6,7 @@
  */
 
 import type { Context } from '@deepseek-ai/cordis'
-import { defineTool, type ToolDefinition } from '@deepseek-ai/dsh-tools'
+import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { LarkClient } from '../core/lark-client.ts'
 
 /** A tool definition bound to the plugin's Lark client at execution time. */
