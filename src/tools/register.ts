@@ -16,6 +16,7 @@ export interface LarkToolDef {
   parameters: Record<string, unknown>
   /** Resolve the Lark client (from the active bridge account). */
   resolveClient: () => LarkClient
+  /** Tool result — the raw SDK response shape is version-drifted, so `unknown`. */
   execute: (args: Record<string, unknown>, client: LarkClient) => Promise<unknown>
   timeoutMs?: number
 }
@@ -39,7 +40,9 @@ export function registerLarkTool(ctx: Context, def: LarkToolDef): void {
     isConcurrencySafe: () => true,
     async execute(args, _exec) {
       const client = def.resolveClient()
-      return def.execute(args, client)
+      // Tool results are dynamic JSON values assembled at runtime; the
+      // executor validates them against the schema after execution.
+      return (await def.execute(args, client)) as never
     },
   }))
 }

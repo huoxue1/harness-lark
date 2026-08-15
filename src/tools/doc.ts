@@ -149,21 +149,21 @@ export function registerDocTools(ctx: Context, resolveClient: () => LarkClient):
     resolveClient,
     async execute(args, client) {
       if (args.search) {
-        const response = await client.client.drive.file.search({
+        const response = await client.api.drive.file.search({
           data: {
             search_key: String(args.search),
             count: typeof args.page_size === 'number' ? args.page_size : 20,
-          } as never,
+          },
         })
         const files = (response.data as { files?: unknown[] } | undefined)?.files ?? []
         return { files }
       }
       if (args.folder_token) {
-        const response = await client.client.drive.file.list({
+        const response = await client.api.drive.file.list({
           params: {
             folder_token: String(args.folder_token),
             page_size: typeof args.page_size === 'number' ? args.page_size : 20,
-          } as never,
+          },
         })
         const files = (response.data as { files?: unknown[] } | undefined)?.files ?? []
         return { files }

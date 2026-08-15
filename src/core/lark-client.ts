@@ -72,11 +72,10 @@ export class LarkClient {
   async probe(): Promise<void> {
     if (this.botOpenIdInternal) return
     try {
-      const resp = await this.sdk.contact.user.get({
+      const resp = (await this.sdk.contact.user.get({
         params: { user_id_type: 'open_id' },
         path: { user_id: this.account.appId },
-        data: {},
-      })
+      } as never)) as unknown
       // The bot's own open_id is not directly queryable; derive from the
       // tenant-level contact endpoint instead. Fall back to app-scoped lookup.
       const data = (resp as { data?: { user?: { open_id?: string; name?: string } } }).data
@@ -164,6 +163,18 @@ export class LarkClient {
 
   /** Access the underlying SDK client for outbound API calls. */
   get client(): Lark.Client {
+    return this.sdk
+  }
+
+  /**
+   * Loosely-typed access to the SDK client for outbound API calls whose
+   * request/response shapes vary across SDK versions (bitable, sheets,
+   * calendar, task, drive, docx). The Lark SDK's bundled types are incomplete
+   * and version-drifted, so this accessor is `any` and callers assert the
+   * response shapes they rely on at the read site.
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  get api(): any {
     return this.sdk
   }
 

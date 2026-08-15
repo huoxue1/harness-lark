@@ -7,6 +7,7 @@ describe('config schema', () => {
     appSecret: 'secret',
     brand: 'feishu',
     connectionMode: 'websocket',
+    replyMode: 'auto',
     dmPolicy: 'open',
     groupPolicy: 'disabled',
     requireMentionInGroups: true,
@@ -22,17 +23,19 @@ describe('config schema', () => {
 
   it('accepts a config without appId (gateway stays offline)', () => {
     const { appId: _ignored, ...rest } = base
-    const value = Config(rest)
+    // appId is optional in the schema but typed required in HarnessLarkConfig;
+    // the test passes a partial config to exercise the optional-schema path.
+    const value = Config(rest as HarnessLarkConfig)
     expect(value.appId).toBeUndefined()
     expect(value.brand).toBe('feishu')
   })
 
   it('rejects an invalid brand', () => {
-    expect(() => Config({ ...base, brand: 'wechat' })).toThrow()
+    expect(() => Config({ ...base, brand: 'wechat' as never })).toThrow()
   })
 
   it('rejects an invalid connection mode', () => {
-    expect(() => Config({ ...base, connectionMode: 'carrier-pigeon' })).toThrow()
+    expect(() => Config({ ...base, connectionMode: 'carrier-pigeon' as never })).toThrow()
   })
 
   it('accepts lark brand and streaming reply mode', () => {

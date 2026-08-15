@@ -24,7 +24,7 @@ export function registerBaseSheetsCalendarTaskTools(
     },
     resolveClient,
     async execute(args, client) {
-      const response = await client.client.bitable.app.list({
+      const response = await client.api.bitable.app.list({
         params: {
           page_size: typeof args.page_size === 'number' ? args.page_size : 20,
           page_token: args.page_token ? String(args.page_token) : undefined,
@@ -43,7 +43,7 @@ export function registerBaseSheetsCalendarTaskTools(
     },
     resolveClient,
     async execute(args, client) {
-      const response = await client.client.bitable.appTable.list({
+      const response = await client.api.bitable.appTable.list({
         path: { app_token: String(args.app_token) },
         params: { page_size: typeof args.page_size === 'number' ? args.page_size : 100 } as never,
       })
@@ -79,14 +79,14 @@ export function registerBaseSheetsCalendarTaskTools(
 
       switch (action) {
         case 'create': {
-          const response = await client.client.bitable.appTableRecord.create({
+          const response = await client.api.bitable.appTableRecord.create({
             path: { app_token: appToken, table_id: tableId },
             data: { fields: (args.fields as Record<string, unknown>) ?? {} } as never,
           })
           return (response.data as { record?: unknown } | undefined)?.record ?? {}
         }
         case 'list': {
-          const response = await client.client.bitable.appTableRecord.list({
+          const response = await client.api.bitable.appTableRecord.list({
             path: { app_token: appToken, table_id: tableId },
             params: {
               page_size: typeof args.page_size === 'number' ? args.page_size : 20,
@@ -97,14 +97,14 @@ export function registerBaseSheetsCalendarTaskTools(
         }
         case 'get': {
           if (!recordId) throw new Error('record: get requires record_id')
-          const response = await client.client.bitable.appTableRecord.get({
+          const response = await client.api.bitable.appTableRecord.get({
             path: { app_token: appToken, table_id: tableId, record_id: recordId },
           })
           return (response.data as { record?: unknown } | undefined)?.record ?? {}
         }
         case 'update': {
           if (!recordId) throw new Error('record: update requires record_id')
-          const response = await client.client.bitable.appTableRecord.update({
+          const response = await client.api.bitable.appTableRecord.update({
             path: { app_token: appToken, table_id: tableId, record_id: recordId },
             data: { fields: (args.fields as Record<string, unknown>) ?? {} } as never,
           })
@@ -112,7 +112,7 @@ export function registerBaseSheetsCalendarTaskTools(
         }
         case 'delete': {
           if (!recordId) throw new Error('record: delete requires record_id')
-          const response = await client.client.bitable.appTableRecord.delete({
+          const response = await client.api.bitable.appTableRecord.delete({
             path: { app_token: appToken, table_id: tableId, record_id: recordId },
           })
           return { deleted: true, response: response.data }
@@ -132,7 +132,7 @@ export function registerBaseSheetsCalendarTaskTools(
     },
     resolveClient,
     async execute(args, client) {
-      const response = await client.client.bitable.appTableField.list({
+      const response = await client.api.bitable.appTableField.list({
         path: { app_token: String(args.app_token), table_id: String(args.table_id) },
       })
       return (response.data as { items?: unknown[] } | undefined)?.items ?? []
@@ -148,7 +148,7 @@ export function registerBaseSheetsCalendarTaskTools(
     },
     resolveClient,
     async execute(args, client) {
-      const response = await client.client.bitable.appTableView.list({
+      const response = await client.api.bitable.appTableView.list({
         path: { app_token: String(args.app_token), table_id: String(args.table_id) },
       })
       return (response.data as { items?: unknown[] } | undefined)?.items ?? []
@@ -178,7 +178,7 @@ export function registerBaseSheetsCalendarTaskTools(
       const action = String(args.action)
       switch (action) {
         case 'create': {
-          const response = await client.client.sheets.spreadsheet.create({
+          const response = await client.api.sheets.spreadsheet.create({
             data: { title: args.title ? String(args.title) : 'New Sheet' } as never,
           })
           const data = response.data as { spreadsheet?: { spreadsheet_token?: string; url?: string } } | undefined
@@ -191,7 +191,7 @@ export function registerBaseSheetsCalendarTaskTools(
           if (!args.spreadsheet_token || !args.range) {
             throw new Error('sheet: read requires spreadsheet_token and range')
           }
-          const response = await client.client.sheets.spreadsheetSheet.query({
+          const response = await client.api.sheets.spreadsheetSheet.query({
             path: { spreadsheet_token: String(args.spreadsheet_token) },
           } as never)
           // Read the raw range via values API.
@@ -248,7 +248,7 @@ export function registerBaseSheetsCalendarTaskTools(
           if (!args.summary || !args.start_time || !args.end_time) {
             throw new Error('event: create requires summary, start_time, and end_time')
           }
-          const response = await client.client.calendar.calendarEvent.create({
+          const response = await client.api.calendar.calendarEvent.create({
             path,
             data: {
               summary: String(args.summary),
@@ -260,7 +260,7 @@ export function registerBaseSheetsCalendarTaskTools(
           return (response.data as { event?: unknown } | undefined)?.event ?? {}
         }
         case 'list': {
-          const response = await client.client.calendar.calendarEvent.list({
+          const response = await client.api.calendar.calendarEvent.list({
             path: { calendar_id: calendarId ?? 'primary' },
             params: { page_size: typeof args.page_size === 'number' ? args.page_size : 20 } as never,
           })
@@ -268,12 +268,12 @@ export function registerBaseSheetsCalendarTaskTools(
         }
         case 'get': {
           if (!eventId) throw new Error('event: get requires event_id')
-          const response = await client.client.calendar.calendarEvent.get({ path })
+          const response = await client.api.calendar.calendarEvent.get({ path })
           return (response.data as { event?: unknown } | undefined)?.event ?? {}
         }
         case 'update': {
           if (!eventId) throw new Error('event: update requires event_id')
-          const response = await client.client.calendar.calendarEvent.patch({
+          const response = await client.api.calendar.calendarEvent.patch({
             path,
             data: {
               summary: args.summary ? String(args.summary) : undefined,
@@ -286,7 +286,7 @@ export function registerBaseSheetsCalendarTaskTools(
         }
         case 'delete': {
           if (!eventId) throw new Error('event: delete requires event_id')
-          await client.client.calendar.calendarEvent.delete({ path })
+          await client.api.calendar.calendarEvent.delete({ path })
           return { deleted: true }
         }
         default:
@@ -323,7 +323,7 @@ export function registerBaseSheetsCalendarTaskTools(
       switch (action) {
         case 'create': {
           if (!args.summary) throw new Error('task: create requires summary')
-          const response = await client.client.task.task.create({
+          const response = await client.api.task.task.create({
             data: {
               summary: String(args.summary),
               description: args.description ? String(args.description) : undefined,
@@ -333,17 +333,17 @@ export function registerBaseSheetsCalendarTaskTools(
           return (response.data as { task?: unknown } | undefined)?.task ?? {}
         }
         case 'list': {
-          const response = await client.client.task.task.list({ data: {} as never })
+          const response = await client.api.task.task.list({ data: {} as never })
           return (response.data as { items?: unknown[] } | undefined)?.items ?? []
         }
         case 'get': {
           if (!taskId) throw new Error('task: get requires task_id')
-          const response = await client.client.task.task.get({ path: { task_id: taskId } })
+          const response = await client.api.task.task.get({ path: { task_id: taskId } })
           return (response.data as { task?: unknown } | undefined)?.task ?? {}
         }
         case 'update': {
           if (!taskId) throw new Error('task: update requires task_id')
-          const response = await client.client.task.task.patch({
+          const response = await client.api.task.task.patch({
             path: { task_id: taskId },
             data: {
               summary: args.summary ? String(args.summary) : undefined,
@@ -356,7 +356,7 @@ export function registerBaseSheetsCalendarTaskTools(
         }
         case 'complete': {
           if (!taskId) throw new Error('task: complete requires task_id')
-          const response = await client.client.task.task.patch({
+          const response = await client.api.task.task.patch({
             path: { task_id: taskId },
             data: { completed_at: String(Date.now()) } as never,
           })
@@ -371,13 +371,13 @@ export function registerBaseSheetsCalendarTaskTools(
 
 /** Read a sheet range as a 2D array of values. */
 async function readSheetRange(client: LarkClient, token: string, range: string): Promise<unknown[][]> {
-  const response = await client.client.sheets.spreadsheetSheet.query({
+  const response = await client.api.sheets.spreadsheetSheet.query({
     path: { spreadsheet_token: token },
   } as never)
   const data = response.data as { sheets?: Array<{ sheet_id?: string }> } | undefined
   const sheetId = data?.sheets?.[0]?.sheet_id
   if (!sheetId) return []
-  const values = await client.client.sheets.spreadsheetSheet.get({
+  const values = await client.api.sheets.spreadsheetSheet.get({
     path: { spreadsheet_token: token },
     params: { range: `${sheetId}!${range}` } as never,
   })
@@ -386,13 +386,13 @@ async function readSheetRange(client: LarkClient, token: string, range: string):
 
 /** Write a 2D array of values into a sheet range. */
 async function writeSheetRange(client: LarkClient, token: string, range: string, values: unknown[]): Promise<void> {
-  const response = await client.client.sheets.spreadsheetSheet.query({
+  const response = await client.api.sheets.spreadsheetSheet.query({
     path: { spreadsheet_token: token },
   } as never)
   const data = response.data as { sheets?: Array<{ sheet_id?: string }> } | undefined
   const sheetId = data?.sheets?.[0]?.sheet_id
   if (!sheetId) throw new Error('sheet: no sheet found in spreadsheet')
-  await client.client.sheets.spreadsheetSheet.set({
+  await client.api.sheets.spreadsheetSheet.set({
     path: { spreadsheet_token: token },
     params: { range: `${sheetId}!${range}` } as never,
     data: { values: values as never[][] } as never,

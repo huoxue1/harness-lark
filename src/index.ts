@@ -99,20 +99,23 @@ export function apply(ctx: Context, config: HarnessLarkConfig): void {
   // Register the Feishu tool families against the plugin's Lark client.
   registerFeishuTools(ctx, () => lark)
 
-  const signal = new AbortController()
-  const monitorPromise = monitorFeishuProvider({
-    config,
-    accountId,
-    bridge,
-    abortSignal: signal.signal,
-  }).catch((error: unknown) => {
-    logger.error(`[harness-lark] gateway failed: ${error instanceof Error ? error.message : String(error)}`)
-  })
+  // Registrations are effects that unwind when the plugin unloads.
+  ctx.effect(() => {
+    const signal = new AbortController()
+    const monitorPromise = monitorFeishuProvider({
+      config,
+      accountId,
+      bridge,
+      abortSignal: signal.signal,
+    }).catch((error: unknown) => {
+      logger.error(`[harness-lark] gateway failed: ${error instanceof Error ? error.message : String(error)}`)
+    })
 
-  ctx.on('dispose', () => {
-    signal.abort()
-    void bridge.dispose()
-    void monitorPromise
+    return () => {
+      signal.abort()
+      void bridge.dispose()
+      void monitorPromise
+    }
   })
 
   logger.info(`[harness-lark] mounted (brand=${config.brand}, mode=${config.connectionMode})`)

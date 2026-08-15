@@ -54,12 +54,14 @@ export async function uploadImage(
   imageType: 'message' | 'avatar' = 'message',
 ): Promise<UploadImageResult> {
   const imageStream = Buffer.isBuffer(image) ? Readable.from(image) : Readable.from(readFileSync(image))
-  const response = await client.im.image.create({
+  const response = (await client.im.image.create({
     data: { image_type: imageType, image: imageStream } as never,
-  })
+  })) as unknown
+  // SDK response shape is version-drifted: image_key may sit at the top level
+  // or under `data`. Normalize both.
   const imageKey =
-    (response.data as { image_key?: string } | undefined)?.image_key ??
-    (response as unknown as { image_key?: string }).image_key
+    (response as { image_key?: string }).image_key ??
+    (response as { data?: { image_key?: string } }).data?.image_key
   if (!imageKey) {
     throw new Error(`[harness-lark] image upload failed: no image_key in response`)
   }
@@ -79,28 +81,21 @@ export async function uploadFile(
   duration?: number,
 ): Promise<UploadFileResult> {
   const fileStream = Buffer.isBuffer(file) ? Readable.from(file) : Readable.from(readFileSync(file))
-  const response = await client.im.file.create({
+  const response = (await client.im.file.create({
     data: {
       file_type: fileType,
       file_name: fileName,
       file: fileStream,
       ...(duration !== undefined ? { duration: String(duration) } : {}),
     } as never,
-  })
+  })) as unknown
   const fileKey =
-    (response.data as { file_key?: string } | undefined)?.file_key ??
-    (response as unknown as { file_key?: string }).file_key
+    (response as { file_key?: string }).file_key ??
+    (response as { data?: { file_key?: string } }).data?.file_key
   if (!fileKey) {
     throw new Error(`[harness-lark] file upload failed: no file_key in response for "${fileName}"`)
   }
   return { fileKey }
-}
-
-/** Read a local file as a Buffer (lazy import so CLI-only paths stay light). */
-function requireFsRead(path: string): Buffer {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const fs = require('node:fs') as typeof import('node:fs')
-  return fs.readFileSync(path)
 }
 
 // ---------------------------------------------------------------------------

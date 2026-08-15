@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
-  buildCard,
   buildCompleteCard,
   buildErrorCard,
   buildStreamingCard,

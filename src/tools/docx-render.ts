@@ -70,11 +70,11 @@ function renderElements(elements?: DocxTextElement[]): string {
 
 /** Render a docx block list into Markdown. */
 export function renderBlocksToMarkdown(blocks: DocxBlock[]): string {
-  const lines: string[] = []
+  const lines: (string | null)[] = []
   for (const block of blocks) {
     lines.push(renderBlock(block))
   }
-  return lines.filter((l) => l !== null).join('\n')
+  return lines.filter((l): l is string => l !== null).join('\n')
 }
 
 function renderBlock(block: DocxBlock): string | null {
