@@ -29,6 +29,12 @@ ENV DSH_TELEMETRY_DISABLED=1
 ENV PNPM_HOME=/pnpm
 ENV PATH=$PNPM_HOME:$PATH
 RUN corepack enable && corepack prepare pnpm@11.7.0 --activate
+# The fs-search tool (glob/grep) shells out to ripgrep; the session workspace
+# root is /src (created by WORKDIR) — sessions persist their cwd and a missing
+# directory makes bash/fs spawns fail with a misleading ENOENT.
+RUN apt-get update && apt-get install -y --no-install-recommends ripgrep \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /src
 
 # Native addons were compiled in dsh-install; only the built artifacts ship.
 COPY --from=dsh-install /usr/local/bin /usr/local/bin

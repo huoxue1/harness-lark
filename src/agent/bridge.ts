@@ -287,8 +287,20 @@ export class AgentBridge {
     // Mutable ref shared with the command layer: /model rewrites `current`,
     // which the loop snapshots on the next step.
     const selectionRef: ModelSelectionRef = { current: selection, assembled: undefined }
-    const setup = selection === undefined ? undefined : (agentCtx: Context) => {
-      installModelSelection(agentCtx, selectionRef)
+    const setup = async (agentCtx: Context): Promise<void> => {
+      if (selection !== undefined) installModelSelection(agentCtx, selectionRef)
+      // In the web profile every model-facing tool row (bash/fs/web/skill/...)
+      // lives inside an agent preset, not the global layer; an agent that
+      // joins none reaches the model with only this plugin's own feishu_*
+      // tools. Mount the deployment's default preset (same one Web-created
+      // sessions use) so channel agents carry the full toolset.
+      const presets = this.ctx.get('agentPresets')
+      if (presets !== undefined) {
+        await presets.mount(agentCtx).catch((error: unknown) => {
+          const message = error instanceof Error ? error.message : String(error)
+          blog('warn', `agent preset mount failed for ${key}: ${message}`)
+        })
+      }
     }
 
     // Try resume first: a persisted session keeps context across restarts.
