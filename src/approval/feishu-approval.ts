@@ -187,14 +187,14 @@ async function sendApprovalCard(options: FeishuApprovalOptions, pending: Pending
   if (result.ok && result.messageId) pending.cardMessageId = result.messageId
 }
 
-/** Patch the approval card to its settled state. */
+/** Patch the approval card to its settled state, disabling the buttons. */
 async function patchApprovalCard(
   options: FeishuApprovalOptions,
   pending: PendingApproval,
   verdict: string,
 ): Promise<void> {
   if (!pending.cardMessageId) return
-  const card = buildApprovalCard(pending)
+  const card = buildApprovalCard(pending, { disabled: true })
   card.elements.push({ tag: 'hr' })
   card.elements.push({
     tag: 'div',
@@ -208,7 +208,10 @@ async function patchApprovalCard(
 }
 
 /** Build the approval card: tool, reason, and two action buttons. */
-function buildApprovalCard(pending: PendingApproval): {
+function buildApprovalCard(
+  pending: PendingApproval,
+  opts: { disabled?: boolean } = {},
+): {
   config: { wide_screen_mode: boolean }
   header: { title: { tag: 'plain_text'; content: string }; template: string }
   elements: Array<Record<string, unknown>>
@@ -216,6 +219,10 @@ function buildApprovalCard(pending: PendingApproval): {
   const reason = pending.reason?.trim()
   const lines = [`**工具**: \`${pending.toolName}\``]
   if (reason) lines.push('', `**原因**: ${reason}`)
+  // Disabled buttons keep the settled verdict visible without inviting a
+  // second (ineffective) click: `disabled` is part of the Feishu card
+  // button component (Card 2.0), accepted by the interactive card renderer.
+  const disabled = opts.disabled === true
   return {
     config: { wide_screen_mode: true },
     header: { title: { tag: 'plain_text', content: '🔐 权限审批请求' }, template: 'orange' },
@@ -229,12 +236,14 @@ function buildApprovalCard(pending: PendingApproval): {
             text: { tag: 'plain_text', content: '✅ 批准' },
             type: 'primary',
             value: { sessionId: pending.sessionId, action: CARD_ACTION_ALLOW },
+            ...(disabled ? { disabled: true } : {}),
           },
           {
             tag: 'button',
             text: { tag: 'plain_text', content: '❌ 拒绝' },
             type: 'danger',
             value: { sessionId: pending.sessionId, action: CARD_ACTION_DENY },
+            ...(disabled ? { disabled: true } : {}),
           },
         ],
       },

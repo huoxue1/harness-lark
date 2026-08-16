@@ -55,12 +55,18 @@ describe('feishu approval answerer', () => {
     expect(card).toContain('escalate sandbox')
     expect(card).toContain('批准')
     expect(card).toContain('拒绝')
+    // Buttons are clickable while pending.
+    expect(card).not.toContain('disabled')
 
     await approval.handleCardAction({
       action: { value: { sessionId: 'lark:default:oc_chat1', action: 'harness-lark:approval:allow' }, tag: 'button' },
     })
     await expect(outcome).resolves.toBe('allowed-once')
     expect(patches.length).toBe(1)
+    // The settled card disables the buttons so it cannot be clicked again.
+    const patched = (patches[0] as { data: { content: string } }).data.content
+    expect(patched).toContain('"disabled":true')
+    expect(patched).toContain('已批准')
     approval.dispose()
   })
 
@@ -76,6 +82,9 @@ describe('feishu approval answerer', () => {
     })
     await expect(outcome).resolves.toBe('rejected')
     expect(patches.length).toBe(1)
+    const patched = (patches[0] as { data: { content: string } }).data.content
+    expect(patched).toContain('"disabled":true')
+    expect(patched).toContain('已拒绝')
     approval.dispose()
   })
 
