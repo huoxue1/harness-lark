@@ -17,7 +17,8 @@ Lark/飞书渠道插件，为 [DeepSeek Harness](https://github.com/deepseek-ai/
 | 📊 Base/表格/日历/任务 | 多维表格（bitable）、电子表格、日历事件、任务 |
 | 🔐 用户 OAuth | 设备授权码流程（RFC 8628），用户级 token 管理 |
 | 👍 表情反馈 | 收到消息回复 `Get` 表情（处理中），完成后换成 `DONE` |
-| ⌨️ 斜杠命令 | `/status` `/model` `/cd` `/new` `/permission` `/help` 本地命令（不进模型） |
+| 🔐 飞书审批卡片 | dsh 审批请求（如 bash 沙箱升级）以带「批准/拒绝」按钮的卡片发到会话，点击即应答，超时自动拒绝 |
+| ⌨️ 斜杠命令 | `/status` `/model` `/cd` `/new` `/permission` `/setting` `/help` 本地命令（不进模型） |
 
 ## 架构
 

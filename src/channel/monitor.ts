@@ -20,6 +20,8 @@ export interface MonitorOptions {
    *  exposes to commands/tools so bot identity and connection state agree. */
   lark: LarkClient
   abortSignal?: AbortSignal
+  /** Card-action handler (approval buttons); defaults to a no-op logger. */
+  onCardAction?: (data: unknown) => Promise<void>
 }
 
 /**
@@ -27,7 +29,7 @@ export interface MonitorOptions {
  * Resolves when `abortSignal` fires.
  */
 export async function monitorFeishuProvider(opts: MonitorOptions): Promise<void> {
-  const { config, accountId = 'default', bridge, lark, abortSignal } = opts
+  const { config, accountId = 'default', bridge, lark, abortSignal, onCardAction } = opts
 
   const dedup = new MessageDedup({ ttlMs: config.dedupTtlMs })
 
@@ -57,7 +59,7 @@ export async function monitorFeishuProvider(opts: MonitorOptions): Promise<void>
       'im.chat.member.bot.added_v1': async () => {},
       'im.chat.member.bot.deleted_v1': async () => {},
       // Card actions are patched to "event" type in LarkClient and routed here.
-      'card.action.trigger': (data: unknown) => handleCardAction(ctx, data),
+      'card.action.trigger': (data: unknown) => handleCardAction(ctx, data, onCardAction),
     },
     abortSignal,
   })
@@ -66,7 +68,19 @@ export async function monitorFeishuProvider(opts: MonitorOptions): Promise<void>
   log('WebSocket gateway started')
 }
 
-/** Handle card action callbacks. Reserved for interactive cards. */
-async function handleCardAction(ctx: MonitorContext, data: unknown): Promise<void> {
-  ctx.log(`card action received: ${JSON.stringify(data).slice(0, 200)}`)
+/** Handle card action callbacks (approval buttons, reserved interactive cards). */
+async function handleCardAction(
+  ctx: MonitorContext,
+  data: unknown,
+  onCardAction: ((data: unknown) => Promise<void>) | undefined,
+): Promise<void> {
+  try {
+    if (onCardAction) {
+      await onCardAction(data)
+    } else {
+      ctx.log(`card action received: ${JSON.stringify(data).slice(0, 200)}`)
+    }
+  } catch (error) {
+    ctx.error(`card action failed: ${error instanceof Error ? error.message : String(error)}`)
+  }
 }

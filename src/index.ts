@@ -18,6 +18,7 @@ import type {} from '@deepseek-ai/dsh-tools'
 import { settingsNamespace } from '@deepseek-ai/dsh-settings'
 import Schema from '@deepseek-ai/schemastery'
 import { AgentBridge } from './agent/bridge.ts'
+import { installFeishuApproval } from './approval/feishu-approval.ts'
 import { monitorFeishuProvider } from './channel/monitor.ts'
 import { Config, type HarnessLarkConfig } from './core/config-schema.ts'
 import { LarkClient } from './core/lark-client.ts'
@@ -105,6 +106,11 @@ export function apply(ctx: Context, config: HarnessLarkConfig): void {
     client: () => lark,
   })
 
+  // Feishu-channel approvals (e.g. bash sandbox escalation) render as an
+  // interactive card with 批准/拒绝 buttons instead of a Web popup nobody
+  // can click from Feishu — without this the ask hangs the turn forever.
+  const approval = installFeishuApproval(ctx, { client: () => lark })
+
   // Register the Feishu tool families against the plugin's Lark client.
   registerFeishuTools(ctx, () => lark)
 
@@ -117,12 +123,14 @@ export function apply(ctx: Context, config: HarnessLarkConfig): void {
       bridge,
       lark,
       abortSignal: signal.signal,
+      onCardAction: (data) => approval.handleCardAction(data),
     }).catch((error: unknown) => {
       logger.error(`[harness-lark] gateway failed: ${error instanceof Error ? error.message : String(error)}`)
     })
 
     return () => {
       signal.abort()
+      approval.dispose()
       void bridge.dispose()
       void monitorPromise
     }
