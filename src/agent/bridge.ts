@@ -56,6 +56,18 @@ export function sessionIdForThread(accountId: string, chatId: string, threadId: 
   return SessionId(`lark:${accountId}:${chatId}:thread:${threadId}${generation === 0 ? '' : `:${generation}`}`)
 }
 
+/** Extract the generation suffix from a chat session id (0 when absent). */
+function generationOf(sessionId: SessionId): number {
+  const text = String(sessionId)
+  // Thread session ids (`...:thread:<threadId>[:gen]`) never carry a numeric
+  // generation here; only plain chat ids get the `:N` suffix.
+  if (text.includes(':thread:')) return 0
+  const parts = text.split(':')
+  const last = parts[parts.length - 1]
+  if (last !== undefined && /^\d+$/.test(last)) return Number(last)
+  return 0
+}
+
 /** Per-chat bridge state. */
 interface ChatRecord {
   agent: Agent
@@ -176,12 +188,17 @@ export class AgentBridge {
       if (commandResult.resetContext) {
         blog('info', `/new requested for ${key}, resetting context (generation ${record.generation} -> ${record.generation + 1})`)
         const nextGeneration = record.generation + 1
-        const newSessionId = this.sessionIdFor(message, nextGeneration)
+        const newSessionId = await this.nextFreshSessionId(message, nextGeneration)
         const keepCwd = record.cwd
         await record.dispose()
         this.records.delete(key)
         this.sessions.delete(record.sessionId)
-        record = await this.ensureAgent(newSessionId, key, message, keepCwd, nextGeneration)
+        // forceCreate: /new must mint a genuinely fresh session. The session
+        // id only carries the generation, but jsonl persistence resolves an id
+        // across ALL project (cwd) directories — a /cd'ed old session with the
+        // same id would otherwise be resumed with its old permission knobs.
+        const freshGeneration = generationOf(newSessionId)
+        record = await this.ensureAgent(newSessionId, key, message, keepCwd, freshGeneration, true)
         this.records.set(key, record)
         return
       }
@@ -192,7 +209,11 @@ export class AgentBridge {
         blog('info', `cwd changed -> ${record.cwd}, rebuilding agent for ${key}`)
         await record.dispose()
         this.records.delete(key)
-        record = await this.ensureAgent(this.sessionIdFor(message, record.generation), key, message, record.cwd, record.generation)
+        // forceCreate: the new cwd must not resume a same-id session that a
+        // previous /cd left under a different project directory (jsonl
+        // persistence resolves session ids across project dirs).
+        const freshId = await this.nextFreshSessionId(message, record.generation)
+        record = await this.ensureAgent(freshId, key, message, record.cwd, generationOf(freshId), true)
         this.records.set(key, record)
       }
       return
@@ -286,6 +307,7 @@ export class AgentBridge {
     firstMessage: MessageContext,
     cwd: string,
     generation: number,
+    forceCreate = false,
   ): Promise<ChatRecord> {
     const agents = this.ctx.agents
 
@@ -323,15 +345,16 @@ export class AgentBridge {
     const LIVE_COLLISION_RETRIES = 10
     const LIVE_COLLISION_DELAY_MS = 2000
     let collisionMessage: string | undefined
-    for (let attempt = 0; attempt < LIVE_COLLISION_RETRIES; attempt++) {
-      try {
-        handle = await agents.resume({
-          resumeSessionId: sessionId,
-          agentOptions,
-          setup,
-        })
-        break
-      } catch (error) {
+    if (!forceCreate) {
+      for (let attempt = 0; attempt < LIVE_COLLISION_RETRIES; attempt++) {
+        try {
+          handle = await agents.resume({
+            resumeSessionId: sessionId,
+            agentOptions,
+            setup,
+          })
+          break
+        } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
         if (!/while it is live|already exists/.test(message)) {
           // Session not persisted or resume failed for another reason.
@@ -343,6 +366,7 @@ export class AgentBridge {
         blog('warn', `resume for ${key} collided with a live session, retrying (${attempt + 1}/${LIVE_COLLISION_RETRIES})`)
         await new Promise((resolve) => setTimeout(resolve, LIVE_COLLISION_DELAY_MS))
       }
+    }
     }
 
     if (!handle) {
@@ -510,6 +534,32 @@ export class AgentBridge {
     const mode = this.opts.replyMode ?? this.opts.config.replyMode
     if (mode === 'auto') return 'static'
     return mode
+  }
+
+  /**
+   * Find a fresh session id for this chat starting at `fromGeneration`: bump
+   * the generation until the id is not among the persisted sessions. JSONL
+   * persistence resolves a session id across ALL project (cwd) directories,
+   * so a `/new` (or a `/cd` that changes cwd) must not collide with a
+   * same-id session a previous reset left under another cwd — resuming that
+   * old log would resurrect its old permission knobs instead of applying the
+   * current default.
+   * @param message - the inbound message identifying the chat.
+   * @param fromGeneration - first generation candidate.
+   * @returns the first non-colliding session id.
+   */
+  private async nextFreshSessionId(message: MessageContext, fromGeneration: number): Promise<SessionId> {
+    const persistence = this.ctx.get('sessionPersistence') as
+      | { listSnapshots(): Promise<Array<{ header: { id: SessionId } }>> }
+      | undefined
+    let generation = fromGeneration
+    for (;;) {
+      const candidate = this.sessionIdFor(message, generation)
+      if (persistence === undefined) return candidate
+      const snapshots = await persistence.listSnapshots()
+      if (!snapshots.some((entry) => entry.header.id === candidate)) return candidate
+      generation += 1
+    }
   }
 
   /** Resolve the model selection: explicit config wins, else the default. */
