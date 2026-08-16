@@ -34,8 +34,11 @@ RUN corepack enable && corepack prepare pnpm@11.7.0 --activate
 # directory makes bash/fs spawns fail with a misleading ENOENT. Installed
 # skills (gitlab/jira/prometheus/redash...) run python3 scripts and git
 # credential-store lookups, so python3/git/curl ship in the runtime image too.
+# node:22-slim ships NO ca-certificates package, so outbound HTTPS (curl,
+# python, node) has no trust store and fails every certificate validation;
+# ca-certificates restores the standard public root bundle.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      ripgrep python3 git curl \
+      ca-certificates ripgrep python3 git curl \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /src
 
