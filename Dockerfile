@@ -31,8 +31,11 @@ ENV PATH=$PNPM_HOME:$PATH
 RUN corepack enable && corepack prepare pnpm@11.7.0 --activate
 # The fs-search tool (glob/grep) shells out to ripgrep; the session workspace
 # root is /src (created by WORKDIR) — sessions persist their cwd and a missing
-# directory makes bash/fs spawns fail with a misleading ENOENT.
-RUN apt-get update && apt-get install -y --no-install-recommends ripgrep \
+# directory makes bash/fs spawns fail with a misleading ENOENT. Installed
+# skills (gitlab/jira/prometheus/redash...) run python3 scripts and git
+# credential-store lookups, so python3/git/curl ship in the runtime image too.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      ripgrep python3 git curl \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /src
 
