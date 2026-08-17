@@ -212,7 +212,7 @@ function buildApprovalCard(
   pending: PendingApproval,
   opts: { disabled?: boolean } = {},
 ): {
-  config: { wide_screen_mode: boolean }
+  config: { wide_screen_mode: boolean; update_multi?: boolean }
   header: { title: { tag: 'plain_text'; content: string }; template: string }
   elements: Array<Record<string, unknown>>
 } {
@@ -224,7 +224,7 @@ function buildApprovalCard(
   // button component (Card 2.0), accepted by the interactive card renderer.
   const disabled = opts.disabled === true
   return {
-    config: { wide_screen_mode: true },
+    config: { wide_screen_mode: true, update_multi: true },
     header: { title: { tag: 'plain_text', content: '🔐 权限审批请求' }, template: 'orange' },
     elements: [
       { tag: 'div', text: { tag: 'lark_md', content: lines.join('\n') } },

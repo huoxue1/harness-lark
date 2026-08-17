@@ -214,4 +214,66 @@ describe('slash commands', () => {
     const r = await runCommand('/setting nonsense', makeCtx())
     expect(r.reply).toContain('未知设置项')
   })
+
+  it('strips a leading @mention before a command', async () => {
+    const ctx = makeCtx()
+    const r = await runCommand('@（江山）的智能助手2号 /status', ctx)
+    expect(r.handled).toBe(true)
+    expect(r.reply).toContain('deepseek-official/deepseek-v4-flash')
+  })
+
+  it('strips a bare @key mention before a command', async () => {
+    const r = await runCommand('@at_test01 /model unavailable-model', makeCtx())
+    expect(r.reply).toContain('未找到模型')
+  })
+
+  it('does not strip a non-mention leading @', async () => {
+    const r = await runCommand('@someone hello', makeCtx())
+    expect(r.handled).toBe(false)
+  })
+
+  it('/stop cancels the active turn', async () => {
+    const cancel = vi.fn()
+    const ctx = makeCtx({
+      agent: { session: { header: { id: 's1', cwd: '/work' } }, ctx: { get: () => undefined }, cancel } as never,
+    })
+    const r = await runCommand('/stop', ctx)
+    expect(r.handled).toBe(true)
+    expect(cancel).toHaveBeenCalledWith({ kind: 'user' }, { keepInbox: true })
+    expect(r.reply).toContain('停止')
+  })
+
+  it('/setting model lists the current default and available models', async () => {
+    const service = {
+      currentSelection: () => ({ provider: 'deepseek-official', model: 'deepseek-v4-pro' }),
+      saveSelection: vi.fn(async () => undefined),
+    }
+    const ctx = makeCtx({ agent: makeAgentWithServices({ agentDefaultModel: service }) })
+    const r = await runCommand('/setting model', ctx)
+    expect(r.handled).toBe(true)
+    expect(r.reply).toContain('deepseek-official/deepseek-v4-pro')
+    expect(r.reply).toContain('deepseek-v4-flash')
+  })
+
+  it('/setting model writes the default model', async () => {
+    const service = {
+      currentSelection: () => ({ provider: 'deepseek-official', model: 'deepseek-v4-pro' }),
+      saveSelection: vi.fn(async () => undefined),
+    }
+    const ctx = makeCtx({ agent: makeAgentWithServices({ agentDefaultModel: service }) })
+    const r = await runCommand('/setting model deepseek-official/deepseek-v4-flash', ctx)
+    expect(r.handled).toBe(true)
+    expect(service.saveSelection).toHaveBeenCalledWith({ provider: 'deepseek-official', model: 'deepseek-v4-flash' })
+  })
+
+  it('/setting model rejects unknown model', async () => {
+    const service = {
+      currentSelection: () => ({ provider: 'deepseek-official', model: 'deepseek-v4-pro' }),
+      saveSelection: vi.fn(async () => undefined),
+    }
+    const ctx = makeCtx({ agent: makeAgentWithServices({ agentDefaultModel: service }) })
+    const r = await runCommand('/setting model nope', ctx)
+    expect(r.reply).toContain('未找到模型')
+    expect(service.saveSelection).not.toHaveBeenCalled()
+  })
 })

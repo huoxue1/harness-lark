@@ -19,6 +19,7 @@ import { settingsNamespace } from '@deepseek-ai/dsh-settings'
 import Schema from '@deepseek-ai/schemastery'
 import { AgentBridge } from './agent/bridge.ts'
 import { installFeishuApproval } from './approval/feishu-approval.ts'
+import { installFeishuAskUser } from './interaction/ask-user.ts'
 import { monitorFeishuProvider } from './channel/monitor.ts'
 import { Config, type HarnessLarkConfig } from './core/config-schema.ts'
 import { LarkClient } from './core/lark-client.ts'
@@ -100,10 +101,20 @@ export function apply(ctx: Context, config: HarnessLarkConfig): void {
     config,
   })
 
+  // Feishu-channel ask_user_question (agent pause for a decision) renders as
+  // an interactive card with one button per option; the preset's Web popup
+  // would otherwise hang the turn on a Feishu chat.
+  const askUser = installFeishuAskUser(ctx, {
+    client: () => lark,
+    chatIdOf: (sessionId) => chatIdOfSession(sessionId),
+  })
+
   const bridge = new AgentBridge(ctx, {
     config,
     accountId,
     client: () => lark,
+    registerAskUserTool: (agentCtx) => askUser.registerTool(agentCtx),
+    onChatMessage: (sessionId, text) => askUser.handleChatMessage(sessionId, text),
   })
 
   // Feishu-channel approvals (e.g. bash sandbox escalation) render as an
@@ -123,7 +134,10 @@ export function apply(ctx: Context, config: HarnessLarkConfig): void {
       bridge,
       lark,
       abortSignal: signal.signal,
-      onCardAction: (data) => approval.handleCardAction(data),
+      onCardAction: [
+        (data) => approval.handleCardAction(data),
+        (data) => askUser.handleCardAction(data),
+      ],
     }).catch((error: unknown) => {
       logger.error(`[harness-lark] gateway failed: ${error instanceof Error ? error.message : String(error)}`)
     })
@@ -131,6 +145,7 @@ export function apply(ctx: Context, config: HarnessLarkConfig): void {
     return () => {
       signal.abort()
       approval.dispose()
+      askUser.dispose()
       void bridge.dispose()
       void monitorPromise
     }
@@ -174,4 +189,17 @@ function installTokenPersistence(ctx: Context): void {
       await scope.replace({ tokens })
     })
   })
+}
+
+/**
+ * Resolve the Feishu chat id from a session id.
+ * Session ids look like `lark:<accountId>:<chatId>[:generation]` or
+ * `lark:<accountId>:<chatId>:thread:<threadId>[:generation]`.
+ * @param sessionId - the dsh session id.
+ * @returns the `oc_...` chat id, or `undefined` for non-Feishu sessions.
+ */
+function chatIdOfSession(sessionId: string): string | undefined {
+  if (!sessionId.startsWith('lark:')) return undefined
+  const parts = sessionId.split(':')
+  return parts[2]
 }

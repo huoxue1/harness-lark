@@ -55,6 +55,8 @@ describe('feishu approval answerer', () => {
     expect(card).toContain('escalate sandbox')
     expect(card).toContain('批准')
     expect(card).toContain('拒绝')
+    // Carries update_multi so the approval button-state patch reaches users.
+    expect(card).toContain('"update_multi":true')
     // Buttons are clickable while pending.
     expect(card).not.toContain('disabled')
 

@@ -20,8 +20,8 @@ export interface MonitorOptions {
    *  exposes to commands/tools so bot identity and connection state agree. */
   lark: LarkClient
   abortSignal?: AbortSignal
-  /** Card-action handler (approval buttons); defaults to a no-op logger. */
-  onCardAction?: (data: unknown) => Promise<void>
+  /** Card-action handlers (approval buttons, ask-user cards); all run. */
+  onCardAction?: Array<(data: unknown) => Promise<void>>
 }
 
 /**
@@ -68,15 +68,15 @@ export async function monitorFeishuProvider(opts: MonitorOptions): Promise<void>
   log('WebSocket gateway started')
 }
 
-/** Handle card action callbacks (approval buttons, reserved interactive cards). */
+/** Handle card action callbacks (approval buttons, ask-user cards). */
 async function handleCardAction(
   ctx: MonitorContext,
   data: unknown,
-  onCardAction: ((data: unknown) => Promise<void>) | undefined,
+  onCardAction: Array<(data: unknown) => Promise<void>> | undefined,
 ): Promise<void> {
   try {
-    if (onCardAction) {
-      await onCardAction(data)
+    if (onCardAction && onCardAction.length > 0) {
+      await Promise.all(onCardAction.map((handler) => handler(data)))
     } else {
       ctx.log(`card action received: ${JSON.stringify(data).slice(0, 200)}`)
     }

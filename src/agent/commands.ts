@@ -50,7 +50,10 @@ export interface CommandResult {
  * @returns CommandResult; `handled` false when the text is not a command.
  */
 export async function runCommand(text: string, cmdCtx: CommandContext): Promise<CommandResult> {
-  const trimmed = text.trim()
+  // Group chats require mentioning the bot, and resolveMentions turns the
+  // mention key into "@昵称 " (or "@用户ID "). Strip a leading @-mention so
+  // "@机器人 /status" still parses as a command.
+  const trimmed = stripLeadingMention(text.trim())
   if (!trimmed.startsWith('/')) return { reply: '', handled: false }
 
   const [command, ...rest] = trimmed.split(/\s+/)
@@ -72,6 +75,8 @@ export async function runCommand(text: string, cmdCtx: CommandContext): Promise<
     case '/new':
     case '/reset':
       return reset(cmdCtx)
+    case '/stop':
+      return stop(cmdCtx)
     case '/feishu':
       return await feishu(arg, cmdCtx)
     case '/help':
@@ -211,8 +216,68 @@ async function setting(subcommand: string, ctx: CommandContext): Promise<Command
   if (sub.startsWith('permission ')) {
     return await settingPermission(sub.slice('permission '.length).trim(), ctx)
   }
+  if (sub === 'model') {
+    return await settingModel('', ctx)
+  }
+  if (sub.startsWith('model ')) {
+    return await settingModel(sub.slice('model '.length).trim(), ctx)
+  }
   return {
-    reply: `未知设置项: "${sub}"。可用: permission（默认权限预设）`,
+    reply: `未知设置项: "${sub}"。可用: permission（默认权限预设）、model（默认模型）`,
+    handled: true,
+  }
+}
+
+/** Minimal face of dsh's agentDefaultModel service. */
+interface AgentDefaultModelService {
+  /** Read the current default model selection. */
+  currentSelection(): ModelSelection
+  /** Persist the default model selection (provider/model/reasoningEffort). */
+  saveSelection(next: ModelSelection): Promise<void>
+}
+
+/** Read or write the default model selection for new sessions. */
+async function settingModel(arg: string, ctx: CommandContext): Promise<CommandResult> {
+  const service = ctx.agent.ctx.get('agentDefaultModel') as AgentDefaultModelService | undefined
+  if (service === undefined) {
+    return { reply: '当前环境未注册默认模型服务（agentDefaultModel），无法设置默认模型。', handled: true }
+  }
+  if (!arg) {
+    let current: ModelSelection
+    try {
+      current = service.currentSelection()
+    } catch {
+      return { reply: '当前未设置默认模型，用 /setting model <provider/model> 设置。', handled: true }
+    }
+    const list = ctx.availableModels
+      .map((m) => {
+        const mark = current.provider === m.provider && current.model === m.model ? ' *' : ''
+        return `  ${m.provider}/${m.model}${mark}`
+      })
+      .join('\n')
+    return {
+      reply: `⚙️ 默认模型设置\n当前默认: ${current.provider}/${current.model}\n\n可用模型:\n${list}\n\n设置: /setting model <provider/model>，例如 /setting model deepseek-official/deepseek-v4-flash\n说明: 默认模型作用于之后新建的会话；当前会话用 /model 切换`,
+      handled: true,
+    }
+  }
+  // Match provider/model or model only, like /model.
+  const target = arg.split('/')
+  const provider = target.length === 2 ? target[0] : undefined
+  const modelName = target.length === 2 ? target[1] : target[0]
+  const match = ctx.availableModels.find((m) =>
+    (provider === undefined || m.provider === provider) && m.model === modelName,
+  )
+  if (!match) {
+    return { reply: `未找到模型 "${arg}"。用 /setting model 查看可用列表。`, handled: true }
+  }
+  try {
+    await service.saveSelection({ provider: match.provider, model: match.model })
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    return { reply: `❌ 设置默认模型失败: ${message}`, handled: true }
+  }
+  return {
+    reply: `✅ 默认模型已设置为: ${match.provider}/${match.model}\n（作用于之后新建的会话；当前会话用 /model 切换）`,
     handled: true,
   }
 }
@@ -254,6 +319,19 @@ async function settingPermission(arg: string, ctx: CommandContext): Promise<Comm
     reply: `✅ 默认权限已设置为: ${arg}\n（作用于之后新建的会话；当前会话用 /permission 切换）`,
     handled: true,
   }
+}
+
+function stop(ctx: CommandContext): CommandResult {
+  // Cancel the active turn (keepInbox=true so queued messages survive; /new is
+  // the explicit full reset). dsh's Agent.cancel aborts the live turn or
+  // between-turn task with a user cause.
+  try {
+    ctx.agent.cancel({ kind: 'user' }, { keepInbox: true })
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    return { reply: `❌ 停止失败: ${message}`, handled: true }
+  }
+  return { reply: '🛑 已请求停止当前回复。', handled: true }
 }
 
 function reset(ctx: CommandContext): CommandResult {
@@ -396,13 +474,22 @@ function help(): CommandResult {
       '  /model         查看可用模型（/model <provider/model> 切换）\n' +
       '  /cd            查看/修改工作目录（/cd <绝对路径>）\n' +
       '  /new           新建上下文（清空当前对话历史）\n' +
+      '  /stop          停止当前正在进行的回复\n' +
       '  /feishu auth   发起飞书用户授权\n' +
       '  /feishu doctor 运行飞书插件诊断\n' +
       '  /permission    查看/切换会话权限预设（/permission <预设名>）\n' +
-      '  /setting       查看设置项；/setting permission [预设名] 设置默认权限\n' +
+      '  /setting       查看设置项；/setting permission [预设名] 设置默认权限；/setting model [模型] 设置默认模型\n' +
       '  /help          显示本帮助',
     handled: true,
   }
+}
+
+/** Strip a leading "@昵称 " (or "@用户ID ") mention prefix from a command. */
+function stripLeadingMention(text: string): string {
+  // Feishu mention keys are `at_xxx`; resolveMentions rewrites `@at_xxx` to
+  // `@名` and bare `at_xxx` to `@名`. Match one leading `@<非空白> ` segment.
+  const match = /^@\S+\s+/.exec(text)
+  return match ? text.slice(match[0].length) : text
 }
 
 function isAbsolute(path: string): boolean {

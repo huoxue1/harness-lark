@@ -36,9 +36,12 @@ English | [中文](README.zh.md) | [📖 安装文档（GitHub Pages）](https:/
 | `/model` | 列出可用模型；`/model <provider/model>` 切换 |
 | `/cd` | 查看工作目录；`/cd <绝对路径>` 修改（下次会话/重启后生效） |
 | `/new` | 新建上下文（清空当前对话历史，别名 `/reset`） |
+| `/stop` | 停止当前正在进行的回复 |
 | `/permission` | 查看/切换会话权限预设（`/permission <预设名>`，如 `danger-full-access`） |
-| `/setting` | 查看设置项；`/setting permission [预设名]` 设置新会话默认权限 |
+| `/setting` | 查看设置项；`/setting permission [预设名]` 设置新会话默认权限；`/setting model [模型]` 设置新会话默认模型 |
 | `/help` | 列出所有命令 |
+
+群聊中命令可带 `@机器人` 前缀（如 `@机器人 /status`），插件会自动剥离提及前缀。
 
 ## 安装
 

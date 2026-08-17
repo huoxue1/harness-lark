@@ -111,6 +111,10 @@ export interface AgentBridgeOptions {
   client: () => LarkClient
   /** Reply mode override; falls back to config.replyMode. */
   replyMode?: 'static' | 'streaming'
+  /** Register a Feishu `ask_user_question` tool on each agent scope (setup). */
+  registerAskUserTool?: (agentCtx: Context) => void
+  /** Forward an inbound chat message (for ask-user message-mode answers). */
+  onChatMessage?: (sessionId: string, text: string) => void
 }
 
 /**
@@ -139,6 +143,15 @@ export class AgentBridge {
   /** Handle one inbound Feishu message: mention gate, then commands or agent. */
   async handleMessage(message: MessageContext): Promise<void> {
     if (this.closed) return
+    // Forward non-command chat text to a message-mode ask_user_question,
+    // which switches a pending ask to collect the user's answer via chat.
+    if (this.opts.onChatMessage) {
+      const text = message.text.trim()
+      if (text && !text.startsWith('/')) {
+        const sessionId = String(this.sessionIdFor(message, 0))
+        this.opts.onChatMessage(sessionId, message.text)
+      }
+    }
     const threadScoped = this.opts.config.topicSeparateSession && message.threadId !== undefined
     const key = threadScoped
       ? `${this.opts.accountId}:${message.chatId}:thread:${message.threadId}`
@@ -334,6 +347,9 @@ export class AgentBridge {
           blog('warn', `agent preset mount failed for ${key}: ${message}`)
         })
       }
+      // Register the Feishu ask_user_question tool LAST so it shadows the
+      // preset's Web-popup copy (agent-scope tools override inherited names).
+      this.opts.registerAskUserTool?.(agentCtx)
     }
 
     // Try resume first: a persisted session keeps context across restarts.
