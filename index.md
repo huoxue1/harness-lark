@@ -7,7 +7,17 @@
 | 方式 | 说明 | 文档 |
 |---|---|---|
 | 🐳 一键镜像 | 用发布好的 Docker 镜像，**自带 harness-lark 插件**，只需填飞书应用凭据 | [用 Docker 安装](install-dsh-docker) |
-| 🧩 已有 dsh | 在已运行的 deepseek-harness 上单独安装 harness-lark 插件 | [安装插件](install-harness-lark) |
+| 🧩 已有 dsh | 在已运行的 deepseek-harness 上，用 `dsh plugin` 命令一键安装 harness-lark | [安装插件](install-harness-lark) |
+
+## 快速开始（dsh 命令一键安装，非 Docker）
+
+```bash
+export FEISHU_APP_ID=cli_xxx
+export FEISHU_APP_SECRET=secret
+bash scripts/install-dsh.sh web harness-lark   # 安装 + 生成配置 + 启动 dsh
+```
+
+（或手动：`dsh plugin --profile web add harness-lark`，再编辑 `cordis.patch.yml` 后 `dsh --profile web`。）
 
 ## 快速开始（镜像方式）
 
