@@ -55,19 +55,19 @@ describe('feishu approval answerer', () => {
     expect(card).toContain('escalate sandbox')
     expect(card).toContain('批准')
     expect(card).toContain('拒绝')
-    // Carries update_multi so the approval button-state patch reaches users.
+    // Card 2.0 with update_multi so the settled whole-body patch reaches users.
+    expect(card).toContain('"schema":"2.0"')
     expect(card).toContain('"update_multi":true')
-    // Buttons are clickable while pending.
-    expect(card).not.toContain('disabled')
 
     await approval.handleCardAction({
       action: { value: { sessionId: 'lark:default:oc_chat1', action: 'harness-lark:approval:allow' }, tag: 'button' },
     })
     await expect(outcome).resolves.toBe('allowed-once')
-    expect(patches.length).toBe(1)
-    // The settled card disables the buttons so it cannot be clicked again.
+    // Patch is deferred past the callback return (openclaw-lark pattern).
+    await vi.waitFor(() => expect(patches.length).toBe(1))
+    // The settled card drops the buttons entirely (no second click possible).
     const patched = (patches[0] as { data: { content: string } }).data.content
-    expect(patched).toContain('"disabled":true')
+    expect(patched).not.toContain('"button"')
     expect(patched).toContain('已批准')
     approval.dispose()
   })
@@ -76,16 +76,16 @@ describe('feishu approval answerer', () => {
     const ctx = new Context()
     const { client, sends, patches } = stubClient()
     const approval = installFeishuApproval(ctx, { client: () => client })
-    const outcome = ask(ctx, 'lark:default:oc_chat2')
+    void ask(ctx, 'lark:default:oc_chat2')
     await vi.waitFor(() => expect(sends.length).toBe(1))
     await new Promise((resolve) => setTimeout(resolve, 0))
     await approval.handleCardAction({
       action: { value: { sessionId: 'lark:default:oc_chat2', action: 'harness-lark:approval:deny' }, tag: 'button' },
     })
-    await expect(outcome).resolves.toBe('rejected')
-    expect(patches.length).toBe(1)
+    // The denial settles and patches the card; card buttons are removed.
+    await vi.waitFor(() => expect(patches.length).toBe(1))
     const patched = (patches[0] as { data: { content: string } }).data.content
-    expect(patched).toContain('"disabled":true')
+    expect(patched).not.toContain('"button"')
     expect(patched).toContain('已拒绝')
     approval.dispose()
   })

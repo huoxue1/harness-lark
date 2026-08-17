@@ -20,8 +20,11 @@ export interface MonitorOptions {
    *  exposes to commands/tools so bot identity and connection state agree. */
   lark: LarkClient
   abortSignal?: AbortSignal
-  /** Card-action handlers (approval buttons, ask-user cards); all run. */
-  onCardAction?: Array<(data: unknown) => Promise<void>>
+  /** Card-action handlers (approval buttons, ask-user cards); run in order.
+   *  The first non-undefined return becomes the callback response, which the
+   *  Feishu WebSocket uses to replace the card for the clicking user
+   *  immediately (openclaw-lark pattern). */
+  onCardAction?: Array<(data: unknown) => Promise<unknown>>
 }
 
 /**
@@ -59,7 +62,10 @@ export async function monitorFeishuProvider(opts: MonitorOptions): Promise<void>
       'im.chat.member.bot.added_v1': async () => {},
       'im.chat.member.bot.deleted_v1': async () => {},
       // Card actions are patched to "event" type in LarkClient and routed here.
-      'card.action.trigger': (data: unknown) => handleCardAction(ctx, data, onCardAction),
+      // The handler's return value becomes the WS callback response (which
+      // Feishu uses to replace the card for the clicker); SDK types only
+      // allow void, so the object response rides through `as never`.
+      'card.action.trigger': (data: unknown) => handleCardAction(ctx, data, onCardAction) as never,
     },
     abortSignal,
   })
@@ -72,15 +78,21 @@ export async function monitorFeishuProvider(opts: MonitorOptions): Promise<void>
 async function handleCardAction(
   ctx: MonitorContext,
   data: unknown,
-  onCardAction: Array<(data: unknown) => Promise<void>> | undefined,
-): Promise<void> {
+  onCardAction: Array<(data: unknown) => Promise<unknown>> | undefined,
+): Promise<unknown> {
   try {
     if (onCardAction && onCardAction.length > 0) {
-      await Promise.all(onCardAction.map((handler) => handler(data)))
+      // Run in order; the first non-undefined return becomes the response the
+      // Feishu WebSocket uses to replace the card for the clicker.
+      for (const handler of onCardAction) {
+        const result = await handler(data)
+        if (result !== undefined) return result
+      }
     } else {
       ctx.log(`card action received: ${JSON.stringify(data).slice(0, 200)}`)
     }
   } catch (error) {
     ctx.error(`card action failed: ${error instanceof Error ? error.message : String(error)}`)
   }
+  return undefined
 }

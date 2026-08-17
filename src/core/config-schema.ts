@@ -61,6 +61,10 @@ export interface HarnessLarkConfig {
   topicSeparateSession: boolean
   /** Dedup TTL for WebSocket redelivered messages, ms. */
   dedupTtlMs: number
+  /** How long an ask_user_question card waits before auto-cancelling, ms. Default 5 min. */
+  askTimeoutMs?: number
+  /** How long an approval card waits before auto-denying, ms. Default 5 min. */
+  approvalTimeoutMs?: number
 }
 
 export const Config: Schema<HarnessLarkConfig> = Schema.object({
@@ -99,4 +103,6 @@ export const Config: Schema<HarnessLarkConfig> = Schema.object({
   respondToMentionAll: Schema.boolean().default(false).description('An @all mention satisfies the group mention requirement'),
   topicSeparateSession: Schema.boolean().default(false).description('Topic-group messages get their own session per thread'),
   dedupTtlMs: Schema.number().default(12 * 60 * 60 * 1000).description('Dedup TTL for redelivered messages, ms'),
+  askTimeoutMs: Schema.number().default(5 * 60 * 1000).description('ask_user_question card auto-cancel timeout, ms'),
+  approvalTimeoutMs: Schema.number().default(5 * 60 * 1000).description('approval card auto-deny timeout, ms'),
 })

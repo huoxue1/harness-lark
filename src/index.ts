@@ -107,6 +107,7 @@ export function apply(ctx: Context, config: HarnessLarkConfig): void {
   const askUser = installFeishuAskUser(ctx, {
     client: () => lark,
     chatIdOf: (sessionId) => chatIdOfSession(sessionId),
+    timeoutMs: config.askTimeoutMs,
   })
 
   const bridge = new AgentBridge(ctx, {
@@ -120,7 +121,10 @@ export function apply(ctx: Context, config: HarnessLarkConfig): void {
   // Feishu-channel approvals (e.g. bash sandbox escalation) render as an
   // interactive card with 批准/拒绝 buttons instead of a Web popup nobody
   // can click from Feishu — without this the ask hangs the turn forever.
-  const approval = installFeishuApproval(ctx, { client: () => lark })
+  const approval = installFeishuApproval(ctx, {
+    client: () => lark,
+    timeoutMs: config.approvalTimeoutMs,
+  })
 
   // Register the Feishu tool families against the plugin's Lark client.
   registerFeishuTools(ctx, () => lark)
