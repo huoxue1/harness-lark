@@ -52,31 +52,34 @@ English | [中文](README.zh.md) | [📖 安装文档（GitHub Pages）](https:/
 - 飞书开放平台应用（凭据：`appId`、`appSecret`；推荐开启长连接模式，无需公网回调地址）
 - 飞书开放平台后台：事件订阅 → 订阅方式选择「使用长连接接收事件」，并订阅 `im.message.receive_v1` 事件
 
-### 环境变量
+### 一键安装（推荐）
 
-插件通过环境变量读取凭据，运行前先设置：
+插件已发布到 npm（`harness-lark`），一条命令完成安装 + 配置 + 启动：
 
 ```sh
+# 1. 设置凭据
 export FEISHU_APP_ID=cli_xxx
 export FEISHU_APP_SECRET=your_secret
+
+# 2. 一键：安装插件到 web profile，生成配置，启动 dsh
+bash scripts/install-dsh.sh web harness-lark
 ```
 
-### 方式一：作为 bundle 安装（推荐）
+脚本做的事：
+1. `dsh plugin --profile web add harness-lark` —— 安装插件（npm 包）
+2. 生成 `$DSH_HOME/profiles/web/cordis.patch.yml`（网关配置，已存在则跳过）
+3. `dsh --profile web` 启动
+
+> 用本地源码构建后安装：`bash scripts/install-dsh.sh web /path/to/harness-lark`
+> （先在仓库目录执行 `pnpm install && pnpm run build`）
+
+### 手动方式
 
 ```sh
-# 1. 构建插件（产出 lib/）
-pnpm install
-pnpm run build
-
-# 2. 安装到 dsh profile（自动写入 profile 的 bundles + dependencies）
-dsh plugin --profile web add ./path/to/harness-lark
-```
-
-### 方式二：npm 发布后安装
-
-```sh
-# 发布后（npm publish），直接：
+# npm 发布后（或本地 bundle）
 dsh plugin --profile web add harness-lark
+# 然后手动编辑 $DSH_HOME/profiles/web/cordis.patch.yml（见下方配置示例）
+dsh --profile web
 ```
 
 ### 方式三：手动 patch 安装

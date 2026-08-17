@@ -20,14 +20,26 @@ docker run -d --name dsh-web \
 
 首次启动时容器自动执行 `dsh plugin --profile web add file:/plugins/harness-lark` 并生成 profile 配置，之后每次重启跳过。
 
-## 方式 B：在已有 dsh 上通过 npm 安装
+## 方式 B：在已有 dsh 上通过 dsh 命令一键安装（推荐非 Docker 场景）
 
-先发布到 npm（`harness-lark`），然后在 dsh 所在机器上：
+插件已发布到 npm（`harness-lark`）。设置凭据后，用仓库提供的一键脚本（或直接 dsh 命令）安装：
 
 ```bash
-# 进入 dsh 的 profile 目录（或用 dsh 的插件命令）
-dsh plugin --profile web add harness-lark
+# 方式 B1：一键脚本（安装 + 生成配置 + 启动）
+git clone https://github.com/huoxue1/harness-lark.git   # 或直接下载 scripts/install-dsh.sh
+cd harness-lark
+export FEISHU_APP_ID=cli_xxx
+export FEISHU_APP_SECRET=secret
+bash scripts/install-dsh.sh web harness-lark             # 等价于下面三条命令
+
+# 方式 B2：逐步 dsh 命令
+dsh plugin --profile web add harness-lark                # 1. 安装插件（npm 包）
+# 2. 编辑 $DSH_HOME/profiles/web/cordis.patch.yml（见下方配置项）
+# 3. 启动
+dsh --profile web
 ```
+
+> 本地源码安装：`bash scripts/install-dsh.sh web /path/to/harness-lark`（先 `pnpm install && pnpm run build`）。
 
 ## 方式 C：从源码安装
 

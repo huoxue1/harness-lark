@@ -159,7 +159,25 @@ export class AgentBridge {
     const previous = this.chains.get(key) ?? Promise.resolve()
     const run = previous.catch(() => undefined).then(() => this.handleMessageSerial(message, key))
     this.chains.set(key, run)
-    await run
+    try {
+      await run
+    } catch (error) {
+      // Surface agent-creation/command failures to the chat instead of
+      // silently dropping them (the caller's catch would swallow the message).
+      const messageText = error instanceof Error ? error.message : String(error)
+      blog('error', `handleMessage failed for ${key}: ${messageText}`)
+      await sendText({
+        client: this.opts.client().client,
+        receiveId: message.chatId,
+        receiveIdType: 'chat_id',
+        text: `❌ 处理消息失败: ${messageText}`,
+        replyToMessageId: message.messageId,
+        replyInThread: message.threadId !== undefined,
+      }).catch((sendError: unknown) => {
+        const msg = sendError instanceof Error ? sendError.message : String(sendError)
+        blog('warn', `error reply failed to ${message.chatId}: ${msg}`)
+      })
+    }
   }
 
   private async handleMessageSerial(message: MessageContext, key: string): Promise<void> {
@@ -492,14 +510,24 @@ export class AgentBridge {
     }
 
     if (event.type === 'turn/end') {
+      const reason = event.data.reason as { kind: string; error?: { message?: string } } | undefined
+      const failed = reason?.kind === 'error'
+      const aborted = reason?.kind === 'aborted'
       if (streaming && record.streamingCard) {
-        const footerMetrics: FooterSessionMetrics = {
-          inputTokens: record.metrics.inputTokens,
-          outputTokens: record.metrics.outputTokens,
-          cacheRead: record.metrics.cacheRead,
-          cacheWrite: record.metrics.cacheWrite,
+        if (failed) {
+          const message = reason?.error?.message ?? '模型调用失败'
+          await record.streamingCard.fail(new Error(message))
+        } else if (aborted) {
+          await record.streamingCard.fail(new Error('已停止'))
+        } else {
+          const footerMetrics: FooterSessionMetrics = {
+            inputTokens: record.metrics.inputTokens,
+            outputTokens: record.metrics.outputTokens,
+            cacheRead: record.metrics.cacheRead,
+            cacheWrite: record.metrics.cacheWrite,
+          }
+          await record.streamingCard.finish({ footerMetrics })
         }
-        await record.streamingCard.finish({ footerMetrics })
         record.streamingCard = undefined
       }
       record.replyAnchor = undefined
@@ -507,6 +535,11 @@ export class AgentBridge {
       void this.sessions.get(sessionId)
       // Swap the in-progress reaction to done.
       void this.markDone(record)
+      if (!streaming && failed) {
+        // Static mode: send the failure as a plain-text reply.
+        const message = reason?.error?.message ?? '模型调用失败'
+        await this.replyText(record, `❌ ${message}`)
+      }
     }
   }
 
