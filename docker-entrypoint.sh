@@ -3,14 +3,15 @@
 #
 # The profile lives in the DSH_HOME volume (/root/.dsh), which starts empty on
 # a fresh volume, so the plugin is installed at first start (not baked in).
-# The marker file skips re-installation on later restarts; the generated
-# profile patch (cordis.patch.yml) is the source of truth and can be edited
-# afterwards — the entrypoint never overwrites it once created.
+# The marker file skips re-installation on later restarts. The plugin declares
+# `dsh.bundle.patch`, so `dsh plugin add` applies its cordis.patch.yml
+# automatically as a bundle layer — no profile patch is written here. The
+# profile's own cordis.patch.yml (if any) is the user's override layer and is
+# never touched.
 set -e
 
 export DSH_HOME=${DSH_HOME:-/root/.dsh}
 PROFILE_DIR="$DSH_HOME/profiles/web"
-PROFILE_PATCH="$PROFILE_DIR/cordis.patch.yml"
 PLUGIN_SRC=/plugins/harness-lark
 
 # dsh web binds the container loopback by design (safety). Docker's published
@@ -41,25 +42,8 @@ if [ ! -f "$PROFILE_DIR/.harness-lark-installed" ]; then
       exit 1
     fi
   fi
-
-  mkdir -p "$PROFILE_DIR"
-  cat > "$PROFILE_PATCH" << 'PATCH'
-# harness-lark Feishu channel (managed by docker-entrypoint.sh)
-- id: lark
-  config:
-    appId: !!js process.env.FEISHU_APP_ID
-    appSecret: !!js process.env.FEISHU_APP_SECRET
-    brand: feishu
-    connectionMode: websocket
-    dmPolicy: open
-    groupPolicy: open
-    requireMentionInGroups: true
-    respondToMentionAll: false
-    replyMode: streaming
-    topicSeparateSession: true
-PATCH
   touch "$PROFILE_DIR/.harness-lark-installed"
-  echo '[entrypoint] harness-lark configured (streaming group replies)'
+  echo '[entrypoint] harness-lark installed (plugin cordis.patch.yml applied as bundle layer)'
 fi
 
 echo '[entrypoint] starting dsh web...'

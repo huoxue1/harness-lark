@@ -5,14 +5,26 @@
  * `/lark/api/settings.*` routes (the DSH settings RPC domain does not serve
  * third-party namespaces to configuration clients).
  *
+ * The section follows the DSH settings recipes: an intro line, one container
+ * card per agent (PluginCard recipe) whose fields are settings rows, and a
+ * footer with the add/save actions plus the wire status line.
+ *
  * @module harness-lark/client
  */
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactElement, type ReactNode } from 'react'
 import type { Context } from '@deepseek-ai/cordis'
+import {
+  Button,
+  IconCheckOutline16,
+  IconPlusOutline16,
+  IconTrashOutline16,
+  Input,
+} from '@deepseek-ai/dsh-client-ui-primitives'
 import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
 // Type-only: pulls the settings shell's SlotMap merges ('settings.section').
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
+import css from './AgentsSection.module.css'
 
 /** One Feishu agent as configured in settings (mirror of the host type). */
 export interface FeishuAgentConfig {
@@ -47,8 +59,145 @@ function blankAgent(): FeishuAgentConfig {
   return { id: '', appId: '', appSecret: '' }
 }
 
+/** One labeled input row (title/desc left, control right). */
+function FieldRow(props: {
+  title: string
+  desc: string
+  control: ReactNode
+}): ReactElement {
+  return (
+    <div className={css.row}>
+      <span className={css.rowText}>
+        <span className={css.title}>{props.title}</span>
+        <span className={css.desc}>{props.desc}</span>
+      </span>
+      <span className={css.control}>{props.control}</span>
+    </div>
+  )
+}
+
+/** One agent card: heading + field rows. */
+function AgentCard(props: {
+  agent: FeishuAgentConfig
+  index: number
+  onChange: (index: number, patch: Partial<FeishuAgentConfig>) => void
+  onRemove: (index: number) => void
+}): ReactElement {
+  const { agent, index, onChange, onRemove } = props
+  const set = (patch: Partial<FeishuAgentConfig>): void => onChange(index, patch)
+  return (
+    <section className={css.group}>
+      <div className={css.heading}>
+        <span className={css.headingTitle}>
+          {agent.id !== '' ? agent.id : `Agent ${index + 1}`}
+        </span>
+        {agent.default === true && <span className={css.badge}>默认</span>}
+        <button
+          type="button"
+          className={css.remove}
+          aria-label="删除 agent"
+          onClick={() => onRemove(index)}
+        >
+          <IconTrashOutline16 />
+        </button>
+      </div>
+      <FieldRow
+        title="Agent ID"
+        desc="唯一标识，用于路由"
+        control={(
+          <Input
+            className={css.fieldInput}
+            value={agent.id}
+            placeholder="例如 default / ops"
+            onChange={(e) => set({ id: e.currentTarget.value })}
+          />
+        )}
+      />
+      <FieldRow
+        title="App ID"
+        desc="飞书应用的 appId"
+        control={(
+          <Input
+            className={css.fieldInput}
+            value={agent.appId}
+            placeholder="cli_xxxxxxxx"
+            spellCheck={false}
+            onChange={(e) => set({ appId: e.currentTarget.value })}
+          />
+        )}
+      />
+      <FieldRow
+        title="App Secret"
+        desc="飞书应用的 appSecret"
+        control={(
+          <Input
+            className={css.fieldInput}
+            type="password"
+            value={agent.appSecret}
+            placeholder="••••••••"
+            spellCheck={false}
+            onChange={(e) => set({ appSecret: e.currentTarget.value })}
+          />
+        )}
+      />
+      <FieldRow
+        title="工作目录"
+        desc="agent 的默认 cwd（可选）"
+        control={(
+          <Input
+            className={css.fieldInput}
+            value={agent.cwd ?? ''}
+            placeholder="例如 /work/ops"
+            onChange={(e) => set({ cwd: e.currentTarget.value })}
+          />
+        )}
+      />
+      <FieldRow
+        title="Chats"
+        desc="路由到该 agent 的会话（逗号分隔：oc_… 或 p2p/group）"
+        control={(
+          <Input
+            className={css.fieldInput}
+            value={(agent.chats ?? []).join(', ')}
+            placeholder="oc_xxx, p2p, group"
+            onChange={(e) => set({
+              chats: e.currentTarget.value.split(',').map((s) => s.trim()).filter(Boolean),
+            })}
+          />
+        )}
+      />
+      <div className={css.block}>
+        <span className={css.blockLabel}>AGENTS.md 指令</span>
+        <textarea
+          className={css.textarea}
+          value={agent.agentsMd ?? ''}
+          placeholder="写入该 agent 工作目录的指令（可选）"
+          onChange={(e) => set({ agentsMd: e.currentTarget.value })}
+        />
+      </div>
+      <div className={css.row}>
+        <span className={css.rowText}>
+          <span className={css.title}>默认 agent</span>
+          <span className={css.desc}>未匹配 chat 规则时兜底</span>
+        </span>
+        <label className={css.switch}>
+          <input
+            type="checkbox"
+            className={css.switchInput}
+            checked={agent.default === true}
+            onChange={(e) => set({ default: e.currentTarget.checked })}
+          />
+          <span className={css.switchTrack}>
+            <span className={css.switchThumb} />
+          </span>
+        </label>
+      </div>
+    </section>
+  )
+}
+
 /** The agents management section body (settings.section entry). */
-export function AgentsSection(): JSX.Element {
+export function AgentsSection(): ReactElement {
   const [agents, setAgents] = useState<FeishuAgentConfig[] | undefined>(undefined)
   const [error, setError] = useState<string | undefined>(undefined)
   const [saved, setSaved] = useState(false)
@@ -103,77 +252,32 @@ export function AgentsSection(): JSX.Element {
   }
 
   if (agents === undefined) {
-    return <div>加载中...</div>
+    return <div className={css.loading}>加载中…</div>
   }
 
   return (
-    <div style={{ padding: '12px', maxWidth: '720px' }}>
-      <h3 style={{ margin: '0 0 4px' }}>飞书 Agents</h3>
-      <p style={{ margin: '0 0 12px', color: '#888' }}>
+    <div className={css.section}>
+      <p className={css.intro}>
         每个 agent 对应一个飞书应用（可共享同一 appId/secret），按 chat 路由。修改后重启生效。
       </p>
       {agents.map((agent, index) => (
-        <div key={index} style={{ border: '1px solid #ddd', borderRadius: '8px', padding: '10px', marginBottom: '10px' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: '8px' }}>
-            <input
-              placeholder="agent id（唯一）"
-              value={agent.id}
-              onChange={(e) => updateAgent(index, { id: e.target.value })}
-              style={{ padding: '6px' }}
-            />
-            <input
-              placeholder="appId"
-              value={agent.appId}
-              onChange={(e) => updateAgent(index, { appId: e.target.value })}
-              style={{ padding: '6px' }}
-            />
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: '8px' }}>
-            <input
-              placeholder="appSecret"
-              value={agent.appSecret}
-              onChange={(e) => updateAgent(index, { appSecret: e.target.value })}
-              style={{ padding: '6px' }}
-            />
-            <input
-              placeholder="默认工作目录（可选，如 /work/a）"
-              value={agent.cwd ?? ''}
-              onChange={(e) => updateAgent(index, { cwd: e.target.value })}
-              style={{ padding: '6px' }}
-            />
-          </div>
-          <textarea
-            placeholder="AGENTS.md 指令（写入该 agent 工作目录）"
-            value={agent.agentsMd ?? ''}
-            onChange={(e) => updateAgent(index, { agentsMd: e.target.value })}
-            style={{ width: '100%', padding: '6px', minHeight: '48px', marginBottom: '8px', boxSizing: 'border-box' }}
-          />
-          <input
-            placeholder="chats（逗号分隔：oc_... 或 p2p/group）"
-            value={(agent.chats ?? []).join(', ')}
-            onChange={(e) => updateAgent(index, {
-              chats: e.target.value.split(',').map((s) => s.trim()).filter(Boolean),
-            })}
-            style={{ width: '100%', padding: '6px', marginBottom: '8px', boxSizing: 'border-box' }}
-          />
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-            <label style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-              <input
-                type="checkbox"
-                checked={agent.default === true}
-                onChange={(e) => updateAgent(index, { default: e.target.checked })}
-              />
-              默认 agent
-            </label>
-            <button type="button" onClick={() => removeAgent(index)}>删除</button>
-          </div>
-        </div>
+        <AgentCard
+          key={agent.id !== '' ? agent.id : `index-${index}`}
+          agent={agent}
+          index={index}
+          onChange={updateAgent}
+          onRemove={removeAgent}
+        />
       ))}
-      <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-        <button type="button" onClick={addAgent}>+ 添加 agent</button>
-        <button type="button" onClick={save}>保存</button>
-        {saved && <span style={{ color: 'green' }}>已保存（重启生效）</span>}
-        {error && <span style={{ color: 'red' }}>{error}</span>}
+      <div className={css.footer}>
+        <Button variant="outline" icon={<IconPlusOutline16 />} onClick={addAgent}>
+          添加 agent
+        </Button>
+        <Button variant="primary" icon={<IconCheckOutline16 />} onClick={() => void save()}>
+          保存
+        </Button>
+        {saved && <span className={`${css.status} ${css.statusSaved}`}>已保存（重启生效）</span>}
+        {error !== undefined && <span className={`${css.status} ${css.statusError}`}>{error}</span>}
       </div>
     </div>
   )

@@ -11,13 +11,16 @@
 
 ## 快速开始（dsh 命令一键安装，非 Docker）
 
+插件声明了 `dsh.bundle.patch`，`dsh plugin` 安装后自动应用插件的 `cordis.patch.yml`，无需手动编辑配置：
+
 ```bash
 export FEISHU_APP_ID=cli_xxx
 export FEISHU_APP_SECRET=secret
-bash scripts/install-dsh.sh web harness-lark   # 安装 + 生成配置 + 启动 dsh
+dsh plugin --profile web add harness-lark   # 安装（自动应用插件自带配置）
+dsh --profile web                           # 启动
 ```
 
-（或手动：`dsh plugin --profile web add harness-lark`，再编辑 `cordis.patch.yml` 后 `dsh --profile web`。）
+（或一条脚本：`bash scripts/install-dsh.sh web harness-lark`，等价于上面两条命令。）
 
 ## 快速开始（镜像方式）
 

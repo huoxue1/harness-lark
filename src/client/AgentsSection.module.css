@@ -1,0 +1,270 @@
+/**
+ * 飞书 settings section chrome (DSH-native tokens throughout):
+ * - the section is a column of GROUP CONTAINER cards (the PluginCard recipe:
+ *   l2 hairline, 16px radius, layer-3 fill), each holding one agent's fields;
+ * - every field is a DSH settings row (title/desc left + control right,
+ *   hairline separators), except the AGENTS.md textarea which spans the card;
+ * - the default-agent flag is a custom switch (a real checkbox driving a
+ *   styled track/thumb);
+ * - the footer holds the add/save buttons and the wire status line.
+ */
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: 100%;
+  max-width: 760px;
+}
+
+/* One-line section intro (the DSH section heading+intro recipe). */
+.intro {
+  margin: 0;
+  padding: 0 2px;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+/* Agent container: the DSH card recipe (PluginCard) — l2 hairline, r16,
+   layer-3 fill; holds its own heading + stacked rows. */
+.group {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 14px 20px 18px;
+  box-sizing: border-box;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 16px;
+  background: var(--dsw-alias-bg-layer-3);
+}
+
+/* Card heading: agent identity left, actions right. */
+.heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 2px 10px;
+}
+
+.headingTitle {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  line-height: 20px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The default-agent badge (the settings catalogHeading count recipe). */
+.badge {
+  flex: none;
+  font-size: 11px;
+  line-height: 16px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--dsw-alias-button-primary-fill);
+  background: color-mix(in srgb, var(--dsw-alias-button-primary-fill) 12%, transparent);
+  color: var(--dsw-alias-button-primary-fill);
+}
+
+/* The remove-agent icon button in the card heading. */
+.remove {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  cursor: pointer;
+}
+
+.remove:hover {
+  color: var(--dsw-alias-state-error-primary);
+  background: var(--dsw-alias-interactive-bg-hover-danger);
+}
+
+.remove:focus-visible {
+  outline: 2px solid var(--dsw-alias-border-l4);
+  outline-offset: 2px;
+}
+
+/* Settings-row recipe (the DSH General section rows): title/desc left,
+   control right, hairline separators (stripped on the last row). */
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 2px;
+  border-bottom: 1px solid var(--dsw-alias-border-l2);
+}
+
+.row:last-child {
+  border-bottom: none;
+}
+
+.rowText {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.title {
+  font-size: 14px;
+  line-height: 22px;
+  color: var(--dsw-alias-label-primary);
+}
+
+.desc {
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.control {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Input width for the compact inline rows. */
+.fieldInput {
+  width: 240px;
+}
+
+/* The AGENTS.md instruction spans the card: a token-styled textarea. */
+.block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 2px;
+  border-bottom: 1px solid var(--dsw-alias-border-l2);
+}
+
+.blockLabel {
+  font-size: 14px;
+  line-height: 22px;
+  color: var(--dsw-alias-label-primary);
+}
+
+.textarea {
+  width: 100%;
+  min-height: 64px;
+  padding: 7px 9px;
+  box-sizing: border-box;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 8px;
+  background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  font-size: 13px;
+  line-height: 20px;
+  resize: vertical;
+  outline: none;
+}
+
+.textarea:focus {
+  border-color: var(--dsw-alias-brand-primary);
+}
+
+.textarea::placeholder {
+  color: var(--dsw-alias-label-dimmed);
+}
+
+/* Custom switch: a real checkbox (native semantics + focus, visually
+   hidden) driving a styled 36x20 track with a sliding thumb. */
+.switch {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+  cursor: pointer;
+}
+
+.switchInput {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  opacity: 0;
+}
+
+.switchTrack {
+  display: inline-flex;
+  align-items: center;
+  width: 36px;
+  height: 20px;
+  padding: 2px;
+  box-sizing: border-box;
+  border-radius: 10px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  background: var(--dsw-alias-bg-layer-1);
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.switchThumb {
+  display: block;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--dsw-alias-label-secondary);
+  transition: transform 0.15s ease, background 0.15s ease;
+}
+
+.switch:hover .switchTrack {
+  border-color: var(--dsw-alias-label-dimmed);
+}
+
+.switchInput:checked + .switchTrack {
+  border-color: var(--dsw-alias-button-primary-fill);
+  background: var(--dsw-alias-button-primary-fill);
+}
+
+.switchInput:checked + .switchTrack .switchThumb {
+  transform: translateX(16px);
+  background: var(--dsw-alias-bg-layer-3);
+}
+
+.switchInput:focus-visible + .switchTrack {
+  outline: 2px solid var(--dsw-alias-state-business-primary);
+  outline-offset: 2px;
+}
+
+/* Footer: add/save buttons plus the wire status line. */
+.footer {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 2px;
+}
+
+.status {
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.statusSaved {
+  color: var(--dsw-alias-state-success-primary);
+}
+
+.statusError {
+  color: var(--dsw-alias-state-error-primary);
+}
+
+.loading {
+  padding: 24px 2px;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--dsw-alias-label-tertiary);
+}

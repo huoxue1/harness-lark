@@ -1,7 +1,7 @@
 {
   "name": "harness-lark",
   "description": "Lark/Feishu channel plugin for DeepSeek Harness: WebSocket event gateway, per-chat persistent agents, interactive cards, media, docs, bases, calendars, tasks, and user OAuth",
-  "version": "0.1.18",
+  "version": "0.1.19",
   "type": "module",
   "main": "lib/index.mjs",
   "types": "lib/index.d.mts",
@@ -84,6 +84,7 @@
     "clsx": "2.0.0",
     "eslint": "^10.8.1",
     "globals": "^17.11.0",
+    "lightningcss": "1.32.0",
     "react": "18.2.0",
     "react-dom": "18.2.0",
     "tsdown": "^0.21.4",

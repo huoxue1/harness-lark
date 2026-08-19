@@ -1,19 +1,17 @@
 # The harness-lark bundle patch: the Lark/Feishu channel over a dsh profile.
 #
-# Applied as a patch layer over an existing profile composition (e.g. after
-# dsh-base). The plugin requires Feishu app credentials; without them the
-# gateway logs a startup error and the WebSocket stays disconnected.
+# Applied automatically as a bundle layer when the package is installed via
+# `dsh plugin --profile <name> add harness-lark` — no manual cordis.patch.yml
+# editing is needed. The plugin reads its Feishu app credentials from the
+# environment, so set them before starting dsh:
 #
-# Example config:
-#   appId: "cli_xxx"
-#   appSecret: "secret"
-#   brand: feishu            # feishu | lark
-#   connectionMode: websocket
-#   dmPolicy: open           # open | pairing | allowlist | disabled
-#   groupPolicy: disabled    # open | allowlist | disabled
-#   requireMentionInGroups: true
+#   export FEISHU_APP_ID=cli_xxx
+#   export FEISHU_APP_SECRET=secret
+#   dsh plugin --profile web add harness-lark
+#   dsh --profile web
 #
-# Install with: dsh plugin --profile web add harness-lark
+# To change defaults (e.g. enable group chats), edit the `config` below in
+# this file, or override `id: lark` in the profile's own cordis.patch.yml.
 
 - insert:
     - id: lark
@@ -21,8 +19,11 @@
       config:
         appId: !!js process.env.FEISHU_APP_ID
         appSecret: !!js process.env.FEISHU_APP_SECRET
-        brand: feishu
+        brand: feishu            # feishu | lark
         connectionMode: websocket
-        dmPolicy: open
-        groupPolicy: disabled
+        dmPolicy: open           # open | pairing | allowlist | disabled
+        groupPolicy: open        # open | allowlist | disabled
         requireMentionInGroups: true
+        respondToMentionAll: false
+        replyMode: streaming     # auto | static | streaming
+        topicSeparateSession: true

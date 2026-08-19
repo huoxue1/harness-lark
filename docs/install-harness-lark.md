@@ -22,10 +22,11 @@ docker run -d --name dsh-web \
 
 ## 方式 B：在已有 dsh 上通过 dsh 命令一键安装（推荐非 Docker 场景）
 
-插件已发布到 npm（`harness-lark`）。设置凭据后，用仓库提供的一键脚本（或直接 dsh 命令）安装：
+插件已发布到 npm（`harness-lark`）。插件声明了 `dsh.bundle.patch`，`dsh plugin` 安装后
+**会自动把插件的 `cordis.patch.yml` 作为 bundle 层应用**——无需再手动编辑配置，凭据直接读环境变量：
 
 ```bash
-# 方式 B1：一键脚本（安装 + 生成配置 + 启动）
+# 方式 B1：一键脚本（安装 + 启动）
 git clone https://github.com/huoxue1/harness-lark.git   # 或直接下载 scripts/install-dsh.sh
 cd harness-lark
 export FEISHU_APP_ID=cli_xxx
@@ -33,13 +34,16 @@ export FEISHU_APP_SECRET=secret
 bash scripts/install-dsh.sh web harness-lark             # 等价于下面三条命令
 
 # 方式 B2：逐步 dsh 命令
-dsh plugin --profile web add harness-lark                # 1. 安装插件（npm 包）
-# 2. 编辑 $DSH_HOME/profiles/web/cordis.patch.yml（见下方配置项）
-# 3. 启动
-dsh --profile web
+export FEISHU_APP_ID=cli_xxx
+export FEISHU_APP_SECRET=secret
+dsh plugin --profile web add harness-lark                # 1. 安装插件（自动应用 cordis.patch.yml）
+dsh --profile web                                        # 2. 启动
 ```
 
 > 本地源码安装：`bash scripts/install-dsh.sh web /path/to/harness-lark`（先 `pnpm install && pnpm run build`）。
+
+> 覆盖默认配置（如禁用群聊）：在 profile 的 `$DSH_HOME/profiles/web/cordis.patch.yml`
+> 中按 `id: lark` 覆盖对应字段即可（见下方配置项）。
 
 ## 方式 C：从源码安装
 

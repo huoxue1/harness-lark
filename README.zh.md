@@ -47,44 +47,52 @@ Lark/飞书渠道插件，为 [DeepSeek Harness](https://github.com/deepseek-ai/
 
 ### 前置条件
 
-- Node.js ≥ 22
+- Node.js ≥ 22（含 pnpm）
 - 已安装 DeepSeek Harness（`dsh` CLI，可通过 `npx @deepseek-ai/dsh web` 或从源码运行）
 - 飞书开放平台应用（凭据：`appId`、`appSecret`；推荐开启长连接模式，无需公网回调地址）
 - 飞书开放平台后台：事件订阅 → 订阅方式选择「使用长连接接收事件」，并订阅 `im.message.receive_v1` 事件
 
-### 一键安装（推荐）
+### 一条命令安装（推荐）
 
-插件已发布到 npm（`harness-lark`），一条命令完成安装 + 配置 + 启动：
+harness-lark 已发布到 npm。插件声明了 `dsh.bundle.patch`，`dsh plugin` 安装后会自动把
+插件的 `cordis.patch.yml` 作为 bundle 层应用——**无需再手动编辑任何配置**，凭据直接读环境变量：
 
 ```sh
 # 1. 设置凭据
 export FEISHU_APP_ID=cli_xxx
 export FEISHU_APP_SECRET=your_secret
 
-# 2. 一键：安装插件到 web profile，生成配置，启动 dsh
-bash scripts/install-dsh.sh web harness-lark
+# 2. 安装到 web profile（同时自动应用插件的 cordis.patch.yml）
+dsh plugin --profile web add harness-lark
+
+# 3. 启动
+dsh --profile web
 ```
 
-脚本做的事：
-1. `dsh plugin --profile web add harness-lark` —— 安装插件（npm 包）
-2. 生成 `$DSH_HOME/profiles/web/cordis.patch.yml`（网关配置，已存在则跳过）
-3. `dsh --profile web` 启动
+可选：用仓库提供的一键脚本（安装 + 启动，等价于上面三条命令）：
+
+```sh
+export FEISHU_APP_ID=cli_xxx
+export FEISHU_APP_SECRET=your_secret
+bash scripts/install-dsh.sh web harness-lark
+```
 
 > 用本地源码构建后安装：`bash scripts/install-dsh.sh web /path/to/harness-lark`
 > （先在仓库目录执行 `pnpm install && pnpm run build`）
 
-### 手动方式
+> 想覆盖插件默认配置（如禁用群聊）时，在 profile 的 `$DSH_HOME/profiles/web/cordis.patch.yml`
+> 中按 `id: lark` 覆盖对应字段即可（见下方配置示例）。
+
+### 方式二：手动 patch 安装（从源码）
 
 ```sh
-# npm 发布后（或本地 bundle）
-dsh plugin --profile web add harness-lark
-# 然后手动编辑 $DSH_HOME/profiles/web/cordis.patch.yml（见下方配置示例）
-dsh --profile web
+git clone https://github.com/huoxue1/harness-lark.git
+cd harness-lark
+pnpm install && pnpm run build
+dsh plugin --profile web add file:/path/to/harness-lark
 ```
 
-### 方式三：手动 patch 安装
-
-在 profile 的 `cordis.patch.yml`（`$DSH_HOME/profiles/<name>/cordis.patch.yml`）中加入：
+或直接在 profile 的 `cordis.patch.yml`（`$DSH_HOME/profiles/<name>/cordis.patch.yml`）中加入：
 
 ```yaml
 - insert:
@@ -103,7 +111,7 @@ dsh --profile web
 
 > 群聊允许 + 流式回复：`groupPolicy: open`、`requireMentionInGroups: false`、`replyMode: streaming`。
 
-### 方式四：Docker 部署
+### 方式三：Docker 部署
 
 参见仓库内 `Dockerfile` / `docker-compose.yml`（dsh 侧镜像），插件通过 `COPY plugins/harness-lark` 打进镜像，entrypoint 首次启动时用 `dsh plugin --profile web add` 装入 profile。
 
