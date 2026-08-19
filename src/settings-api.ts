@@ -13,6 +13,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { settingsNamespace } from '@deepseek-ai/dsh-settings'
+import type {} from '@deepseek-ai/dsh-host-webserver'
 import type { HarnessLarkAgent } from './core/config-schema.ts'
 import { isTrustedApiRequest, type TrustedHostsSource } from './trust-fence.ts'
 
@@ -41,50 +42,54 @@ export function registerSettingsApi(
     trustedHosts: TrustedHostsSource
   },
 ): () => void {
-  const webServer = ctx.get('webServer') as
-    | { register(route: { kind: 'prefix'; path: string; handler: (req: IncomingMessage, res: ServerResponse) => void | Promise<void> }): () => void }
-    | undefined
-  if (webServer === undefined) {
-    console.warn('[harness-lark] webServer service unavailable — settings API not registered')
-    return () => {}
-  }
-
-  return webServer.register({
-    kind: 'prefix',
-    path: SETTINGS_API_PREFIX,
-    handler: async (req, res) => {
-      if (!isTrustedApiRequest(req, deps.trustedHosts())) {
-        writeJson(res, 403, { ok: false, error: { code: 'forbidden', message: 'forbidden' } })
-        return
-      }
-      if (req.method !== 'POST') {
-        writeJson(res, 405, { ok: false, error: { code: 'method-error', message: 'method not allowed' } })
-        return
-      }
-      const pathname = new URL(req.url ?? '/', 'http://dsh.internal').pathname
-      const method = pathname.startsWith(`${SETTINGS_API_PREFIX}/`)
-        ? pathname.slice(`${SETTINGS_API_PREFIX}/`.length)
-        : undefined
-
-      try {
-        if (method === 'settings.get') {
-          writeJson(res, 200, { ok: true, agents: deps.getAgents() })
+  let dispose: (() => void) | undefined
+  ctx.inject(['webServer'], (sctx) => {
+    const webServer = sctx.webServer as
+      | { register(route: { kind: 'prefix'; path: string; handler: (req: IncomingMessage, res: ServerResponse) => void | Promise<void> }): () => void }
+      | undefined
+    if (webServer === undefined) {
+      console.warn('[harness-lark] webServer service unavailable — settings API not registered')
+      return
+    }
+    dispose = webServer.register({
+      kind: 'prefix',
+      path: SETTINGS_API_PREFIX,
+      handler: async (req, res) => {
+        if (!isTrustedApiRequest(req, deps.trustedHosts())) {
+          writeJson(res, 403, { ok: false, error: { code: 'forbidden', message: 'forbidden' } })
           return
         }
-        if (method === 'settings.set') {
-          const body = await readJsonBody(req)
-          const agents = Array.isArray(body?.agents) ? body.agents as HarnessLarkAgent[] : []
-          await deps.saveAgents(agents)
-          writeJson(res, 200, { ok: true, agents })
+        if (req.method !== 'POST') {
+          writeJson(res, 405, { ok: false, error: { code: 'method-error', message: 'method not allowed' } })
           return
         }
-        writeJson(res, 404, { ok: false, error: { code: 'not-found', message: `unknown method ${method ?? ''}` } })
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error)
-        writeJson(res, 500, { ok: false, error: { code: 'internal', message } })
-      }
-    },
+        const pathname = new URL(req.url ?? '/', 'http://dsh.internal').pathname
+        const method = pathname.startsWith(`${SETTINGS_API_PREFIX}/`)
+          ? pathname.slice(`${SETTINGS_API_PREFIX}/`.length)
+          : undefined
+
+        try {
+          if (method === 'settings.get') {
+            writeJson(res, 200, { ok: true, agents: deps.getAgents() })
+            return
+          }
+          if (method === 'settings.set') {
+            const body = await readJsonBody(req)
+            const agents = Array.isArray(body?.agents) ? body.agents as HarnessLarkAgent[] : []
+            await deps.saveAgents(agents)
+            writeJson(res, 200, { ok: true, agents })
+            return
+          }
+          writeJson(res, 404, { ok: false, error: { code: 'not-found', message: `unknown method ${method ?? ''}` } })
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error)
+          writeJson(res, 500, { ok: false, error: { code: 'internal', message } })
+        }
+      },
+    })
   })
+
+  return () => { dispose?.() }
 }
 
 /** Read and parse a JSON request body (capped). */
