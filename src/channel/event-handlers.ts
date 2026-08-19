@@ -10,11 +10,13 @@ import type { FeishuMessageEvent } from '../core/types.ts'
 import { MessageDedup } from '../messaging/inbound/dedup.ts'
 import { parseMessageEvent } from '../messaging/inbound/parse.ts'
 import type { AgentBridge } from '../agent/bridge.ts'
+import type { MessageContext } from '../core/types.ts'
 
 export interface MonitorContext {
   accountId: string
   lark: LarkClient
-  bridge: AgentBridge
+  /** Route one parsed message to the bridge of its serving agent. */
+  bridge: (message: MessageContext) => AgentBridge | undefined
   dedup: MessageDedup
   log: (msg: string) => void
   error: (msg: string) => void
@@ -64,7 +66,12 @@ export async function handleMessageEvent(ctx: MonitorContext, data: unknown): Pr
     const parsed = parseMessageEvent(event, lark.botOpenId)
     log(`message ${msgId} from chat ${parsed.chatId} (${parsed.chatType})`)
 
-    await bridge.handleMessage(parsed)
+    const target = bridge(parsed)
+    if (target === undefined) {
+      log(`message ${msgId}: no agent serves chat ${parsed.chatId} (${parsed.chatType}), dropping`)
+      return
+    }
+    await target.handleMessage(parsed)
   } catch (error) {
     ctx.error(`handleMessageEvent failed: ${error instanceof Error ? error.message : String(error)}`)
   }

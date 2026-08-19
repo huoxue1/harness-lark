@@ -126,6 +126,37 @@ dsh --profile web
 | `requireMentionInGroups` | boolean | `true` | 群聊中是否需要 @机器人 |
 | `topicSeparateSession` | boolean | `false` | 话题群消息按 thread 独立建 session（每个话题一个上下文） |
 | `dedupTtlMs` | number | 12h | 消息去重窗口 |
+| `agents` | array | — | 多 agent 配置（见下）：每个 agent 一个 chat 路由分区 |
+
+### 多 Agent 配置（`agents`）
+
+支持多个 agent（可共享同一个飞书应用的 `appId`/`appSecret`），按 chat 路由：
+
+```yaml
+- id: lark
+  config:
+    agents:
+      - id: agent-a
+        appId: cli_xxx            # 可与其他 agent 共享同一 appId/secret
+        appSecret: secret
+        cwd: /work/a              # 该 agent 会话的默认工作目录
+        agentsMd: |               # 写入 <cwd>/AGENTS.md，作为该 agent 的指令
+          # agent-a 的专属指令
+        chats: [oc_111, p2p]      # 限定该 agent 服务的 chat：oc_ 精确 id 或 p2p/group 标签
+        default: true             # 默认 agent：未匹配其他 agent 的 chat 走它
+      - id: agent-b
+        appId: cli_xxx            # 共享同一应用
+        appSecret: secret
+        cwd: /work/b
+        agentsMd: "..."
+        chats: [oc_222, group]    # 只服务该群组
+```
+
+- `chats`：`oc_...` 精确 chat_id 或 `p2p`/`group` 类型标签；缺省 = 服务全部（仅限单 agent 组）。
+- `default: true`：未匹配的 chat 路由到此 agent；未标记时取组内第一个。
+- 同一 `appId` 的 agent 共享一条 WebSocket 连接，消息按 chat 路由到各自 bridge（独立 cwd/AGENTS.md/session）。
+- 也可在 Web 设置界面（dsh settings 的 `harness-lark` namespace）编辑 `agents`，重启后生效。
+- 旧的顶层 `appId`/`appSecret`（或 `FEISHU_APP_ID`/`FEISHU_APP_SECRET` 环境变量）仍兼容，作为单 agent 配置。
 
 ## 工具清单
 

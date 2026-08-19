@@ -19,9 +19,14 @@ export type ReplyModeValue = 'auto' | 'static' | 'streaming'
 /** Per-chat access policy. */
 export type ChatPolicy = 'open' | 'allowlist' | 'pairing' | 'disabled'
 
-/** Plugin configuration. */
-export interface HarnessLarkConfig {
-  /** Feishu app id. */
+/** A chat matcher: an exact `oc_...` chat id, or the `p2p`/`group` type tag. */
+export type AgentChatRule = string
+
+/** One Feishu agent: a chat-routed partition of one Feishu app. */
+export interface HarnessLarkAgent {
+  /** Stable agent id (used in session ids and settings). */
+  id: string
+  /** Feishu app id (may be shared by several agents). */
   appId: string
   /** Feishu app secret. */
   appSecret: string
@@ -29,6 +34,32 @@ export interface HarnessLarkConfig {
   encryptKey?: string
   /** Event verification token (empty for long-connection mode). */
   verificationToken?: string
+  /** Default working directory for sessions created by this agent. */
+  cwd?: string
+  /** Workspace instructions written to `<cwd>/AGENTS.md` for this agent. */
+  agentsMd?: string
+  /**
+   * Chats this agent serves: exact `oc_...` chat ids and/or the `p2p`/`group`
+   * type tags. A message matches when its chat id is listed or its chat type
+   * tag is listed. Absent = serve every chat (only valid for one agent per app).
+   */
+  chats?: AgentChatRule[]
+  /** Marks this agent as the default route for chats matching no other agent. */
+  default?: boolean
+}
+
+/** Plugin configuration. */
+export interface HarnessLarkConfig {
+  /** Feishu app id (legacy single-agent; superseded by `agents`). */
+  appId: string
+  /** Feishu app secret (legacy single-agent; superseded by `agents`). */
+  appSecret: string
+  /** Event encryption key (empty for long-connection mode). */
+  encryptKey?: string
+  /** Event verification token (empty for long-connection mode). */
+  verificationToken?: string
+  /** Multi-agent configuration: one entry per Feishu app. */
+  agents?: HarnessLarkAgent[]
   /** Platform brand: feishu or lark. */
   brand: LarkBrand
   /** Connection mode: websocket (long connection) or webhook. */
@@ -68,10 +99,21 @@ export interface HarnessLarkConfig {
 }
 
 export const Config: Schema<HarnessLarkConfig> = Schema.object({
-  appId: Schema.string().description('Feishu app id'),
-  appSecret: Schema.string().description('Feishu app secret'),
+  appId: Schema.string().description('Feishu app id (legacy single-agent; use `agents` for multiple)'),
+  appSecret: Schema.string().description('Feishu app secret (legacy single-agent; use `agents` for multiple)'),
   encryptKey: Schema.string().description('Event encryption key (empty for long-connection mode)'),
   verificationToken: Schema.string().description('Event verification token (empty for long-connection mode)'),
+  agents: Schema.array(Schema.object({
+    id: Schema.string().required().description('Stable agent id (used in session ids and settings)'),
+    appId: Schema.string().required().description('Feishu app id (may be shared by several agents)'),
+    appSecret: Schema.string().required().description('Feishu app secret'),
+    encryptKey: Schema.string().description('Event encryption key (empty for long-connection mode)'),
+    verificationToken: Schema.string().description('Event verification token (empty for long-connection mode)'),
+    cwd: Schema.string().description('Default working directory for sessions created by this agent'),
+    agentsMd: Schema.string().description('Workspace instructions written to <cwd>/AGENTS.md for this agent'),
+    chats: Schema.array(Schema.string()).description('Chats this agent serves: exact oc_... ids and/or p2p/group tags'),
+    default: Schema.boolean().description('Default route for chats matching no other agent'),
+  })).description('Multi-agent configuration: one entry per chat-routed agent'),
   brand: Schema.union([
     Schema.const('feishu'),
     Schema.const('lark'),

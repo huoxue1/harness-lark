@@ -9,13 +9,15 @@
 import type { AgentBridge } from '../agent/bridge.ts'
 import type { LarkClient } from '../core/lark-client.ts'
 import type { HarnessLarkConfig } from '../core/config-schema.ts'
+import type { MessageContext } from '../core/types.ts'
 import { MessageDedup } from '../messaging/inbound/dedup.ts'
 import { handleMessageEvent, type MonitorContext } from './event-handlers.ts'
 
 export interface MonitorOptions {
   config: HarnessLarkConfig
   accountId?: string
-  bridge: AgentBridge
+  /** Route one parsed message to its serving agent's bridge. */
+  bridge: (message: MessageContext) => AgentBridge | undefined
   /** The shared LarkClient — probe/WS must use the SAME instance the bridge
    *  exposes to commands/tools so bot identity and connection state agree. */
   lark: LarkClient

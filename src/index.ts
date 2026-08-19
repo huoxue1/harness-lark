@@ -17,12 +17,15 @@ import type {} from '@deepseek-ai/dsh-llm'
 import type {} from '@deepseek-ai/dsh-tools'
 import { settingsNamespace } from '@deepseek-ai/dsh-settings'
 import Schema from '@deepseek-ai/schemastery'
+import { mkdirSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { AgentBridge } from './agent/bridge.ts'
 import { installFeishuApproval } from './approval/feishu-approval.ts'
 import { installFeishuAskUser } from './interaction/ask-user.ts'
 import { monitorFeishuProvider } from './channel/monitor.ts'
-import { Config, type HarnessLarkConfig } from './core/config-schema.ts'
+import { Config, type HarnessLarkAgent, type HarnessLarkConfig } from './core/config-schema.ts'
 import { LarkClient } from './core/lark-client.ts'
+import type { MessageContext } from './core/types.ts'
 import { hydrateTokens, initTokenPersistence, type StoredTokenRecord } from './core/token-store.ts'
 import { registerFeishuTools } from './tools/index.ts'
 
@@ -61,24 +64,21 @@ export const name = 'harness-lark'
 /** Core services required before the gateway can bridge messages. */
 export const inject = ['agents', 'tools']
 
-/** Mount the Feishu gateway and agent bridge. */
+/** Mount the Feishu gateways and agent bridges, one per configured agent. */
 export function apply(ctx: Context, config: HarnessLarkConfig): void {
   const logger = ctx.logger
-  const accountId = 'default'
 
   // Persist user OAuth tokens through dsh's built-in settings store (a
   // `harness-lark` namespace in `~/.dsh/settings.yaml`, inside the persisted
-  // data volume) so authorization survives process restarts. Optional: when no
-  // settings service is mounted, tokens stay in memory for the session.
-  installTokenPersistence(ctx)
+  // data volume) so authorization survives process restarts, and expose the
+  // multi-agent configuration section to the Web settings surface.
+  const { resolveAgents } = installSettingsIntegration(ctx, config)
+  const agents = resolveAgents()
 
-  // No credentials configured: mount the tool family so agents can still use
-  // Feishu APIs when a deployment supplies credentials later, but skip the
-  // WebSocket gateway (its startup would fail loud and take the profile down).
-  if (!config.appId || !config.appSecret) {
-    logger.warn('[harness-lark] appId/appSecret not configured — skipping WebSocket gateway; set FEISHU_APP_ID / FEISHU_APP_SECRET to enable')
+  if (agents.length === 0) {
+    logger.warn('[harness-lark] no Feishu app configured — skipping gateways; set FEISHU_APP_ID / FEISHU_APP_SECRET or configure agents in settings')
     const larkStub = new LarkClient({
-      accountId,
+      accountId: 'default',
       appId: config.appId ?? '',
       appSecret: config.appSecret ?? '',
       encryptKey: config.encryptKey ?? '',
@@ -90,72 +90,109 @@ export function apply(ctx: Context, config: HarnessLarkConfig): void {
     return
   }
 
-  // One LarkClient owns both the inbound WebSocket and outbound HTTP.
-  const lark = new LarkClient({
-    accountId,
-    appId: config.appId,
-    appSecret: config.appSecret,
-    encryptKey: config.encryptKey ?? '',
-    verificationToken: config.verificationToken ?? '',
-    brand: config.brand,
-    config,
-  })
+  // Group agents by appId: one Feishu app = one WebSocket connection, with
+  // messages routed by chat to the serving agent's bridge.
+  const byApp = new Map<string, HarnessLarkAgent[]>()
+  const disposers: Array<() => void> = []
+  for (const agent of agents) {
+    const cwd = agent.cwd ?? process.cwd()
+    // Write workspace instructions so dsh's agent-instructions loads them
+    // (AGENTS.md discovery walks up from the session cwd).
+    if (agent.agentsMd && agent.agentsMd.trim().length > 0) {
+      writeWorkspaceInstructions(cwd, agent.agentsMd)
+    }
+    const group = byApp.get(agent.appId) ?? []
+    group.push(agent)
+    byApp.set(agent.appId, group)
+  }
 
-  // Feishu-channel ask_user_question (agent pause for a decision) renders as
-  // an interactive card with one button per option; the preset's Web popup
-  // would otherwise hang the turn on a Feishu chat.
-  const askUser = installFeishuAskUser(ctx, {
-    client: () => lark,
-    chatIdOf: (sessionId) => chatIdOfSession(sessionId),
-    timeoutMs: config.askTimeoutMs,
-  })
+  for (const [appId, group] of byApp) {
+    const lark = new LarkClient({
+      accountId: appId,
+      appId,
+      appSecret: group[0]!.appSecret,
+      encryptKey: group[0]!.encryptKey ?? '',
+      verificationToken: group[0]!.verificationToken ?? '',
+      brand: config.brand,
+      config,
+    })
 
-  const bridge = new AgentBridge(ctx, {
-    config,
-    accountId,
-    client: () => lark,
-    registerAskUserTool: (agentCtx) => askUser.registerTool(agentCtx),
-    onChatMessage: (sessionId, text) => askUser.handleChatMessage(sessionId, text),
-  })
+    // Build one bridge per agent in the group (own cwd + ask/approval wiring).
+    const bridgeEntries: Array<{ agent: HarnessLarkAgent; bridge: AgentBridge; askUser: ReturnType<typeof installFeishuAskUser>; approval: ReturnType<typeof installFeishuApproval> }> = []
+    for (const agent of group) {
+      const accountId = agent.id || 'default'
+      const cwd = agent.cwd ?? process.cwd()
+      const askUser = installFeishuAskUser(ctx, {
+        client: () => lark,
+        chatIdOf: (sessionId) => chatIdOfSession(sessionId),
+        timeoutMs: config.askTimeoutMs,
+      })
+      const bridge = new AgentBridge(ctx, {
+        config,
+        accountId,
+        client: () => lark,
+        registerAskUserTool: (agentCtx) => askUser.registerTool(agentCtx),
+        onChatMessage: (sessionId, text) => askUser.handleChatMessage(sessionId, text),
+        defaultCwd: cwd,
+      })
+      const approval = installFeishuApproval(ctx, {
+        client: () => lark,
+        timeoutMs: config.approvalTimeoutMs,
+      })
+      registerFeishuTools(ctx, () => lark)
+      bridgeEntries.push({ agent, bridge, askUser, approval })
+    }
 
-  // Feishu-channel approvals (e.g. bash sandbox escalation) render as an
-  // interactive card with 批准/拒绝 buttons instead of a Web popup nobody
-  // can click from Feishu — without this the ask hangs the turn forever.
-  const approval = installFeishuApproval(ctx, {
-    client: () => lark,
-    timeoutMs: config.approvalTimeoutMs,
-  })
+    // Route one parsed message: exact chat id or chat-type tag match first,
+    // then the group's default agent (or the first agent) as fallback.
+    const route = (message: MessageContext): AgentBridge | undefined => {
+      for (const { agent, bridge } of bridgeEntries) {
+        const rules = agent.chats
+        if (rules === undefined || rules.length === 0) {
+          // A single-agent group serves everything; a multi-agent group
+          // without rules treats each entry as a fallback candidate.
+          if (bridgeEntries.length === 1) return bridge
+          continue
+        }
+        if (rules.includes(message.chatId) || rules.includes(message.chatType)) return bridge
+      }
+      const fallback = bridgeEntries.find(({ agent }) => agent.default === true) ?? bridgeEntries[0]
+      return fallback?.bridge
+    }
 
-  // Register the Feishu tool families against the plugin's Lark client.
-  registerFeishuTools(ctx, () => lark)
-
-  // Registrations are effects that unwind when the plugin unloads.
-  ctx.effect(() => {
     const signal = new AbortController()
     const monitorPromise = monitorFeishuProvider({
       config,
-      accountId,
-      bridge,
+      accountId: appId,
+      bridge: route,
       lark,
       abortSignal: signal.signal,
       onCardAction: [
-        (data) => approval.handleCardAction(data),
-        (data) => askUser.handleCardAction(data),
+        ...bridgeEntries.flatMap(({ approval, askUser }) => [
+          (data: unknown) => approval.handleCardAction(data),
+          (data: unknown) => askUser.handleCardAction(data),
+        ]),
       ],
     }).catch((error: unknown) => {
-      logger.error(`[harness-lark] gateway failed: ${error instanceof Error ? error.message : String(error)}`)
+      logger.error(`[harness-lark] gateway failed for app ${appId}: ${error instanceof Error ? error.message : String(error)}`)
     })
 
-    return () => {
+    disposers.push(() => {
       signal.abort()
-      approval.dispose()
-      askUser.dispose()
-      void bridge.dispose()
+      for (const { bridge, askUser, approval } of bridgeEntries) {
+        approval.dispose()
+        askUser.dispose()
+        void bridge.dispose()
+      }
       void monitorPromise
-    }
-  })
+    })
+    logger.info(`[harness-lark] mounted app ${appId} with ${bridgeEntries.length} agent(s) (brand=${config.brand}, mode=${config.connectionMode})`)
+  }
 
-  logger.info(`[harness-lark] mounted (brand=${config.brand}, mode=${config.connectionMode})`)
+  // Registrations are effects that unwind when the plugin unloads.
+  ctx.effect(() => () => {
+    for (const dispose of disposers) dispose()
+  })
 }
 
 /** One user token record persisted under the `harness-lark` settings namespace. */
@@ -167,20 +204,46 @@ const UatTokenRecordSchema = Schema.object({
   scope: Schema.string(),
 })
 
-/** Settings namespace section: `{ tokens: { [openId]: record } }`. */
-const UatSectionSchema = Schema.object({
-  tokens: Schema.dict(UatTokenRecordSchema).default({}),
+/** Settings section for one configured Feishu agent. */
+const AgentSettingsSchema = Schema.object({
+  id: Schema.string().required(),
+  appId: Schema.string().required(),
+  appSecret: Schema.string().required(),
+  encryptKey: Schema.string(),
+  verificationToken: Schema.string(),
+  cwd: Schema.string(),
+  agentsMd: Schema.string(),
+  chats: Schema.array(Schema.string()),
+  default: Schema.boolean(),
 })
+
+/** Settings namespace section: `{ tokens, agents }`. */
+const HarnessLarkSectionSchema = Schema.object({
+  tokens: Schema.dict(UatTokenRecordSchema).default({}),
+  agents: Schema.array(AgentSettingsSchema).default([]),
+})
+
+/** Settings shape resolved from the `harness-lark` namespace. */
+interface HarnessLarkSettings {
+  tokens?: Record<string, unknown>
+  agents?: HarnessLarkAgent[]
+}
 
 /**
  * Wire the in-memory token store to dsh's `ctx.settings` store: hydrate from
  * the persisted document at startup and write every mutation through. A no-op
- * when no settings service is mounted (tests, minimal profiles).
+ * when no settings service is mounted (tests, minimal profiles). Also exposes
+ * the multi-agent configuration section for the Web settings surface.
  */
-function installTokenPersistence(ctx: Context): void {
+function installSettingsIntegration(ctx: Context, config: HarnessLarkConfig): {
+  /** Agents from settings when configured; falls back to config/env. */
+  resolveAgents: () => HarnessLarkAgent[]
+} {
+  let storedAgents: HarnessLarkAgent[] | undefined
   ctx.inject(['settings'], (sctx) => {
-    const scope = sctx.settings.register(settingsNamespace('harness-lark'), UatSectionSchema)
-    const section = scope.get() as { tokens?: Record<string, unknown> }
+    const registered = sctx.settings.register(settingsNamespace('harness-lark'), HarnessLarkSectionSchema)
+    const section = registered.get() as HarnessLarkSettings
+    storedAgents = section.agents
     hydrateTokens(
       Object.entries(section.tokens ?? {}).map(([openId, token]) => ({
         openId,
@@ -190,9 +253,22 @@ function installTokenPersistence(ctx: Context): void {
     initTokenPersistence(async (entries) => {
       const tokens: Record<string, unknown> = {}
       for (const { openId, token } of entries) tokens[openId] = token
-      await scope.replace({ tokens })
+      await registered.replace({ tokens })
     })
   })
+
+  const resolveAgents = (): HarnessLarkAgent[] => {
+    if (storedAgents !== undefined && storedAgents.length > 0) return storedAgents
+    if (config.agents !== undefined && config.agents.length > 0) return config.agents
+    // Legacy single-agent: environment variables (FEISHU_APP_ID/SECRET) or the
+    // top-level config appId/appSecret.
+    const appId = process.env.FEISHU_APP_ID ?? config.appId ?? ''
+    const appSecret = process.env.FEISHU_APP_SECRET ?? config.appSecret ?? ''
+    if (!appId || !appSecret) return []
+    return [{ id: 'default', appId, appSecret }]
+  }
+
+  return { resolveAgents }
 }
 
 /**
@@ -206,4 +282,22 @@ function chatIdOfSession(sessionId: string): string | undefined {
   if (!sessionId.startsWith('lark:')) return undefined
   const parts = sessionId.split(':')
   return parts[2]
+}
+
+/**
+ * Write an agent's workspace instructions to `<cwd>/AGENTS.md`, creating the
+ * directory when needed. dsh's agent-instructions plugin discovers AGENTS.md
+ * by walking up from the session cwd, so the file becomes the agent's
+ * baseline instructions automatically.
+ * @param cwd - the agent's default working directory.
+ * @param content - the AGENTS.md content.
+ */
+function writeWorkspaceInstructions(cwd: string, content: string): void {
+  try {
+    mkdirSync(cwd, { recursive: true })
+    writeFileSync(join(cwd, 'AGENTS.md'), content, 'utf8')
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    console.warn(`[harness-lark] failed to write AGENTS.md at ${cwd}: ${message}`)
+  }
 }

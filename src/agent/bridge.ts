@@ -115,6 +115,8 @@ export interface AgentBridgeOptions {
   registerAskUserTool?: (agentCtx: Context) => void
   /** Forward an inbound chat message (for ask-user message-mode answers). */
   onChatMessage?: (sessionId: string, text: string) => void
+  /** Default working directory for sessions created by this account's agent. */
+  defaultCwd?: string
 }
 
 /**
@@ -193,7 +195,7 @@ export class AgentBridge {
     let record = this.records.get(key)
     if (!record) {
       blog('info', `creating agent for ${key}...`)
-      record = await this.ensureAgent(sessionId, key, message, process.cwd(), 0)
+      record = await this.ensureAgent(sessionId, key, message, this.opts.defaultCwd ?? process.cwd(), 0)
       blog('info', `agent ready for ${key}`)
     }
     // Track the message to reply to + whether it is inside a topic thread.
