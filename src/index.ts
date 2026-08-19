@@ -28,6 +28,7 @@ import { LarkClient } from './core/lark-client.ts'
 import type { MessageContext } from './core/types.ts'
 import { hydrateTokens, initTokenPersistence, type StoredTokenRecord } from './core/token-store.ts'
 import { registerFeishuTools } from './tools/index.ts'
+import { registerSettingsApi } from './settings-api.ts'
 
 export { Config }
 export type { HarnessLarkConfig }
@@ -72,8 +73,17 @@ export function apply(ctx: Context, config: HarnessLarkConfig): void {
   // `harness-lark` namespace in `~/.dsh/settings.yaml`, inside the persisted
   // data volume) so authorization survives process restarts, and expose the
   // multi-agent configuration section to the Web settings surface.
-  const { resolveAgents } = installSettingsIntegration(ctx, config)
+  const { resolveAgents, saveAgents } = installSettingsIntegration(ctx, config)
   const agents = resolveAgents()
+
+  // Web settings API: the Settings shell form reads/writes agents through
+  // this plugin-owned route (third-party namespaces are not served by the
+  // DSH settings RPC domain to configuration clients).
+  const trustedHosts = (): readonly string[] => {
+    const webRuntime = ctx.get('webRuntime') as { trustedHosts?: readonly string[] } | undefined
+    return webRuntime?.trustedHosts ?? []
+  }
+  const disposeSettingsApi = registerSettingsApi(ctx, { getAgents: resolveAgents, saveAgents, trustedHosts })
 
   if (agents.length === 0) {
     logger.warn('[harness-lark] no Feishu app configured — skipping gateways; set FEISHU_APP_ID / FEISHU_APP_SECRET or configure agents in settings')
@@ -191,6 +201,7 @@ export function apply(ctx: Context, config: HarnessLarkConfig): void {
 
   // Registrations are effects that unwind when the plugin unloads.
   ctx.effect(() => () => {
+    disposeSettingsApi()
     for (const dispose of disposers) dispose()
   })
 }
@@ -238,10 +249,14 @@ interface HarnessLarkSettings {
 function installSettingsIntegration(ctx: Context, config: HarnessLarkConfig): {
   /** Agents from settings when configured; falls back to config/env. */
   resolveAgents: () => HarnessLarkAgent[]
+  /** Persist agents to the settings namespace (for the Web settings API). */
+  saveAgents: (agents: HarnessLarkAgent[]) => Promise<void>
 } {
   let storedAgents: HarnessLarkAgent[] | undefined
+  let registeredScope: { get(): HarnessLarkSettings; replace(section: object): Promise<void>; update(patch: object): Promise<void> } | undefined
   ctx.inject(['settings'], (sctx) => {
     const registered = sctx.settings.register(settingsNamespace('harness-lark'), HarnessLarkSectionSchema)
+    registeredScope = registered
     const section = registered.get() as HarnessLarkSettings
     storedAgents = section.agents
     hydrateTokens(
@@ -268,7 +283,15 @@ function installSettingsIntegration(ctx: Context, config: HarnessLarkConfig): {
     return [{ id: 'default', appId, appSecret }]
   }
 
-  return { resolveAgents }
+  const saveAgents = async (agents: HarnessLarkAgent[]): Promise<void> => {
+    if (registeredScope === undefined) {
+      throw new Error('settings service unavailable: cannot persist agents')
+    }
+    storedAgents = agents
+    await registeredScope.update({ agents })
+  }
+
+  return { resolveAgents, saveAgents }
 }
 
 /**
