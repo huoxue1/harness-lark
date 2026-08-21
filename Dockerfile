@@ -18,7 +18,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends git python3 mak
 
 # The published @deepseek-ai/dsh CLI bundles the web app and every profile
 # package; override with --build-arg DSH_VERSION=<npm version>.
-ARG DSH_VERSION=0.1.0-rc.6
+ARG DSH_VERSION=0.1.1-rc.2
 RUN npm install -g @deepseek-ai/dsh@${DSH_VERSION} --no-audit --no-fund
 
 # ── plain: stock dsh CLI (no Feishu plugin) ───────────────────────────────
