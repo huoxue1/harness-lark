@@ -22,6 +22,8 @@ import {
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { SessionId, type SessionEvent } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-agent-default-model'
+import { mkdirSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 import type { HarnessLarkConfig } from '../core/config-schema.ts'
 import type { MessageContext } from '../core/types.ts'
 import { sendText, type SendMessageParams } from '../messaging/outbound/deliver.ts'
@@ -117,6 +119,19 @@ export interface AgentBridgeOptions {
   onChatMessage?: (sessionId: string, text: string) => void
   /** Default working directory for sessions created by this account's agent. */
   defaultCwd?: string
+  /**
+   * Lazy resolver for the default working directory (evaluated when the first
+   * session is created, so host services like the workspace registry have
+   * finished bootstrapping). Takes precedence over nothing — the explicit
+   * `defaultCwd` wins when both are set.
+   */
+  resolveDefaultCwd?: () => string
+  /**
+   * Workspace instructions written to `<cwd>/AGENTS.md` when a session is
+   * created. Written lazily so the file lands in the session's real working
+   * directory (workspace-resolved), which agent-instructions discovery walks.
+   */
+  agentsMd?: string
 }
 
 /**
@@ -140,6 +155,17 @@ export class AgentBridge {
   constructor(ctx: Context, opts: AgentBridgeOptions) {
     this.ctx = ctx
     this.opts = opts
+  }
+
+  /** Write `<cwd>/AGENTS.md` for this bridge's agent (best-effort, logs on failure). */
+  private writeAgentsMd(cwd: string, content: string): void {
+    try {
+      mkdirSync(cwd, { recursive: true })
+      writeFileSync(join(cwd, 'AGENTS.md'), content, 'utf8')
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      blog('warn', `failed to write AGENTS.md at ${cwd}: ${message}`)
+    }
   }
 
   /** Handle one inbound Feishu message: mention gate, then commands or agent. */
@@ -195,7 +221,14 @@ export class AgentBridge {
     let record = this.records.get(key)
     if (!record) {
       blog('info', `creating agent for ${key}...`)
-      record = await this.ensureAgent(sessionId, key, message, this.opts.defaultCwd ?? process.cwd(), 0)
+      // Resolve the working directory once per chat at first creation: the
+      // explicit agent cwd wins, else the lazy workspace-aware default. Write
+      // AGENTS.md into that directory so agent-instructions picks it up.
+      const cwd = this.opts.defaultCwd ?? this.opts.resolveDefaultCwd?.() ?? process.cwd()
+      if (this.opts.agentsMd && this.opts.agentsMd.trim().length > 0) {
+        this.writeAgentsMd(cwd, this.opts.agentsMd)
+      }
+      record = await this.ensureAgent(sessionId, key, message, cwd, 0)
       blog('info', `agent ready for ${key}`)
     }
     // Track the message to reply to + whether it is inside a topic thread.

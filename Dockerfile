@@ -67,7 +67,7 @@ ENV PNPM_HOME=/pnpm
 ENV PATH=$PNPM_HOME:$PATH
 RUN corepack enable
 WORKDIR /plugin
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.json tsdown.config.ts ./
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.json tsconfig.client.json tsdown.config.ts ./
 COPY src ./src
 COPY cordis.patch.yml ./
 RUN pnpm install --frozen-lockfile

@@ -66,14 +66,19 @@ export const name = 'harness-lark'
 export const inject = ['agents', 'tools']
 
 /** Mount the Feishu gateways and agent bridges, one per configured agent. */
-export function apply(ctx: Context, config: HarnessLarkConfig): void {
+export async function apply(ctx: Context, config: HarnessLarkConfig): Promise<void> {
   const logger = ctx.logger
 
   // Persist user OAuth tokens through dsh's built-in settings store (a
   // `harness-lark` namespace in `~/.dsh/settings.yaml`, inside the persisted
   // data volume) so authorization survives process restarts, and expose the
   // multi-agent configuration section to the Web settings surface.
-  const { resolveAgents, saveAgents } = installSettingsIntegration(ctx, config)
+  const { resolveAgents, saveAgents, whenReady } = installSettingsIntegration(ctx, config)
+  // Wait for the settings service to mount (web profile) before resolving
+  // agents, so Web-saved agentsMd/cwd take effect at startup instead of the
+  // gateway falling back to env/config. A profile without a settings service
+  // is allowed to proceed after a short grace period.
+  await whenReady
   const agents = resolveAgents()
 
   // Web settings API: the Settings shell form reads/writes agents through
@@ -101,16 +106,11 @@ export function apply(ctx: Context, config: HarnessLarkConfig): void {
   }
 
   // Group agents by appId: one Feishu app = one WebSocket connection, with
-  // messages routed by chat to the serving agent's bridge.
+  // messages routed by chat to the serving agent's bridge. (AGENTS.md is
+  // written by resolveAgents/saveAgents; the bridge cwd is resolved below.)
   const byApp = new Map<string, HarnessLarkAgent[]>()
   const disposers: Array<() => void> = []
   for (const agent of agents) {
-    const cwd = agent.cwd ?? process.cwd()
-    // Write workspace instructions so dsh's agent-instructions loads them
-    // (AGENTS.md discovery walks up from the session cwd).
-    if (agent.agentsMd && agent.agentsMd.trim().length > 0) {
-      writeWorkspaceInstructions(cwd, agent.agentsMd)
-    }
     const group = byApp.get(agent.appId) ?? []
     group.push(agent)
     byApp.set(agent.appId, group)
@@ -131,7 +131,8 @@ export function apply(ctx: Context, config: HarnessLarkConfig): void {
     const bridgeEntries: Array<{ agent: HarnessLarkAgent; bridge: AgentBridge; askUser: ReturnType<typeof installFeishuAskUser>; approval: ReturnType<typeof installFeishuApproval> }> = []
     for (const agent of group) {
       const accountId = agent.id || 'default'
-      const cwd = agent.cwd ?? process.cwd()
+      // Explicit agent cwd wins; otherwise resolve lazily on first session
+      // creation (workspace registry has finished bootstrapping by then).
       const askUser = installFeishuAskUser(ctx, {
         client: () => lark,
         chatIdOf: (sessionId) => chatIdOfSession(sessionId),
@@ -143,7 +144,9 @@ export function apply(ctx: Context, config: HarnessLarkConfig): void {
         client: () => lark,
         registerAskUserTool: (agentCtx) => askUser.registerTool(agentCtx),
         onChatMessage: (sessionId, text) => askUser.handleChatMessage(sessionId, text),
-        defaultCwd: cwd,
+        defaultCwd: agent.cwd,
+        resolveDefaultCwd: () => resolveDefaultCwd(ctx),
+        agentsMd: agent.agentsMd,
       })
       const approval = installFeishuApproval(ctx, {
         client: () => lark,
@@ -242,19 +245,28 @@ interface HarnessLarkSettings {
 
 /**
  * Wire the in-memory token store to dsh's `ctx.settings` store: hydrate from
- * the persisted document at startup and write every mutation through. A no-op
- * when no settings service is mounted (tests, minimal profiles). Also exposes
- * the multi-agent configuration section for the Web settings surface.
+ * the persisted document at startup and write every mutation through. Also
+ * exposes the multi-agent configuration section for the Web settings surface.
+ *
+ * Registration is synchronous when the settings service is already mounted
+ * (the web profile always mounts it via dsh-base before bundle plugins), so
+ * the gateway resolves agents from settings immediately instead of falling
+ * back to config/env during the async `ctx.inject` window.
  */
 function installSettingsIntegration(ctx: Context, config: HarnessLarkConfig): {
   /** Agents from settings when configured; falls back to config/env. */
   resolveAgents: () => HarnessLarkAgent[]
   /** Persist agents to the settings namespace (for the Web settings API). */
   saveAgents: (agents: HarnessLarkAgent[]) => Promise<void>
+  /** Settles once agents can be resolved authoritatively (settings mounted or a grace period elapsed). */
+  whenReady: Promise<void>
 } {
   let storedAgents: HarnessLarkAgent[] | undefined
   let registeredScope: { get(): HarnessLarkSettings; replace(section: object): Promise<void>; update(patch: object): Promise<void> } | undefined
-  ctx.inject(['settings'], (sctx) => {
+  let markReady: () => void = () => {}
+  const whenReady = new Promise<void>((resolve) => { markReady = resolve })
+  /** Register the namespace and hydrate state; shared by sync and async paths. */
+  const register = (sctx: Context): void => {
     const registered = sctx.settings.register(settingsNamespace('harness-lark'), HarnessLarkSectionSchema)
     registeredScope = registered
     const section = registered.get() as HarnessLarkSettings
@@ -270,11 +282,42 @@ function installSettingsIntegration(ctx: Context, config: HarnessLarkConfig): {
       for (const { openId, token } of entries) tokens[openId] = token
       await registered.replace({ tokens })
     })
-  })
+    markReady()
+  }
+  // Synchronous path when the settings service is already mounted; async
+  // `ctx.inject` fallback keeps non-settings profiles working, and a grace
+  // period keeps the gateway from hanging when no settings service exists.
+  const existing = ctx.get('settings')
+  if (existing !== undefined) {
+    register(ctx)
+  } else {
+    ctx.inject(['settings'], (sctx) => {
+      register(sctx)
+    })
+    const GRACE_MS = 3000
+    const timer = setTimeout(() => markReady(), GRACE_MS)
+    timer.unref?.()
+  }
+
+  /** Resolve the default working directory: first workspace, else process cwd. */
+  const resolveDefaultCwdFor = (): string => resolveDefaultCwd(ctx)
+  /** Write each agent's AGENTS.md into its configured cwd (on save; the bridge
+   * additionally writes lazily into the workspace-resolved session cwd). */
+  const writeAgentsMd = (agents: HarnessLarkAgent[]): void => {
+    for (const agent of agents) {
+      if (agent.agentsMd && agent.agentsMd.trim().length > 0) {
+        writeWorkspaceInstructions(agent.cwd ?? resolveDefaultCwdFor(), agent.agentsMd)
+      }
+    }
+  }
 
   const resolveAgents = (): HarnessLarkAgent[] => {
-    if (storedAgents !== undefined && storedAgents.length > 0) return storedAgents
-    if (config.agents !== undefined && config.agents.length > 0) return config.agents
+    if (storedAgents !== undefined && storedAgents.length > 0) {
+      return storedAgents
+    }
+    if (config.agents !== undefined && config.agents.length > 0) {
+      return config.agents
+    }
     // Legacy single-agent: environment variables (FEISHU_APP_ID/SECRET) or the
     // top-level config appId/appSecret.
     const appId = process.env.FEISHU_APP_ID ?? config.appId ?? ''
@@ -289,9 +332,10 @@ function installSettingsIntegration(ctx: Context, config: HarnessLarkConfig): {
     }
     storedAgents = agents
     await registeredScope.update({ agents })
+    writeAgentsMd(agents)
   }
 
-  return { resolveAgents, saveAgents }
+  return { resolveAgents, saveAgents, whenReady }
 }
 
 /**
@@ -305,6 +349,20 @@ function chatIdOfSession(sessionId: string): string | undefined {
   if (!sessionId.startsWith('lark:')) return undefined
   const parts = sessionId.split(':')
   return parts[2]
+}
+
+/**
+ * Resolve the default working directory for Feishu-created sessions: the first
+ * registered workspace (so channel sessions appear under a real workspace in
+ * the Web GUI), else the process cwd. A workspace registry is optional — when
+ * absent (minimal profiles), fall back to `process.cwd()`.
+ * @param ctx - plugin context (may expose `workspaceRegistry`).
+ * @returns the default cwd.
+ */
+function resolveDefaultCwd(ctx: Context): string {
+  const registry = ctx.get('workspaceRegistry') as { list(): readonly { path: string }[] } | undefined
+  const first = registry?.list()[0]
+  return first?.path ?? process.cwd()
 }
 
 /**
