@@ -720,13 +720,28 @@ export class AgentBridge {
    */
   private async nextFreshSessionId(message: MessageContext, fromGeneration: number): Promise<SessionId> {
     const persistence = this.ctx.get('sessionPersistence') as
-      | { listSnapshots(): Promise<Array<{ header: { id: SessionId } }>> }
+      | {
+          listSnapshots?(): Promise<Array<{ header: { id: SessionId } }>>
+          list?(): Promise<Array<{ header: { id: SessionId } }>>
+        }
       | undefined
     let generation = fromGeneration
     for (;;) {
       const candidate = this.sessionIdFor(message, generation)
       if (persistence === undefined) return candidate
-      const snapshots = await persistence.listSnapshots()
+      // dsh's sessionPersistence service only guarantees `list()` (see
+      // @deepseek-ai/dsh-session-persistence-jsonl: list / load / stat) — it has
+      // no `listSnapshots()`, so calling it threw
+      // "persistence.listSnapshots is not a function" on every `/new` and `/cd`.
+      // Both methods resolve to the same shape ([{ header: { id } }]): prefer the
+      // richer one when a host provides it, otherwise fall back to `list()`, and
+      // treat a service with neither as "no persisted sessions".
+      const snapshots =
+        typeof persistence.listSnapshots === 'function'
+          ? await persistence.listSnapshots()
+          : typeof persistence.list === 'function'
+            ? await persistence.list()
+            : []
       if (!snapshots.some((entry) => entry.header.id === candidate)) return candidate
       generation += 1
     }
